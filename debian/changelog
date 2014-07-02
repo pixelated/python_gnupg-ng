@@ -1,6 +1,7 @@
 python-gnupg-ng (1.2.6-1) unstable; urgency=medium
 
   * Update to 1.2.6 release 
+  * Change to non-native format.
 
  -- Ben Carrillo <ben@futeisha.org>  Tue, 01 Jul 2014 10:24:59 -0500
 
