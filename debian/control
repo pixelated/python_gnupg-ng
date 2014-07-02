@@ -1,0 +1,65 @@
+Source: python-gnupg-ng
+Maintainer: Ben Carrillo <ben@futeisha.org>
+Section: python
+Priority: optional
+Build-Depends: python-all (>= 2.6.6-3), debhelper (>= 9),
+ python-setuptools (>= 0.6.24), python3-setuptools (>= 0.6.24),
+ python-sphinx | python3-sphinx, python3 | python3-all | python3-dev | python3-all-dev,
+ python-psutil | python3-psutil,
+X-Python-Version: >= 2.6
+X-Python3-Version: >= 3.0
+Standards-Version: 3.9.5
+Uploaders: Micah Anderson <micah@debian.org>
+Homepage: https://github.com/isislovecruft/python-gnupg
+
+Package: python-gnupg-ng
+Architecture: all
+Depends: ${misc:Depends}, ${python:Depends},
+ python-psutil (>= 0.5.1), python-setuptools (>= 0.6.24), gnupg
+Conflicts: python-gnupg
+XB-Python-Version: ${python:Versions}
+Replaces: python-gnupg
+Provides: ${python:Provides}, python-gnupg
+Description: Python wrapper for GnuPG
+ A Python interface for handling interactions with GnuPG, including keyfile
+ generation, keyring maintenance, import and export, encryption and decryption,
+ sending to and recieving from keyservers, and signing and verification.
+ .
+ This is a fork of python-gnupg (from version 0.3.2), patched to sanitize
+ untrusted inputs, due to the necessity of executing subprocess.Popen([...],
+ shell=True) in order to communicate with GnuPG. Several speed improvements were
+ also made based on code profiling, and the API has been cleaned up to support
+ an easier, more Pythonic, interaction.
+ 
+Package: python3-gnupg-ng
+Architecture: all
+Depends: ${misc:Depends}, ${python3:Depends},
+ python3-psutil (>= 0.5.1), python3-setuptools (>= 0.6.24), gnupg
+Conflicts: python3-gnupg
+XB-Python-Version: ${python3:Versions}
+Replaces: python3-gnupg
+Provides: ${python:Provides}, python3-gnupg
+Description: Python wrapper for GnuPG (Python3)
+ A Python interface for handling interactions with GnuPG, including keyfile
+ generation, keyring maintenance, import and export, encryption and decryption,
+ sending to and recieving from keyservers, and signing and verification.
+ .
+ This is a fork of python-gnupg (from version 0.3.2), patched to sanitize
+ untrusted inputs, due to the necessity of executing subprocess.Popen([...],
+ shell=True) in order to communicate with GnuPG. Several speed improvements
+ were also made based on code profiling, and the API has been cleaned up to
+ support an easier, more Pythonic, interaction. This package contains the
+ Python 3 version.  
+
+Package: python-gnupg-ng-doc
+Section: doc
+Architecture: all
+Depends: ${misc:Depends}, ${sphinxdoc:Depends},
+ python-setuptools (>= 0.6.45) | python3-setuptools (>=0.6.24),
+ python-psutil | python3-psutil
+Description: Python wrapper for GnuPG
+ A Python interface for handling interactions with GnuPG, including keyfile
+ generation, keyring maintenance, import and export, encryption and decryption,
+ sending to and recieving from keyservers, and signing and verification.
+ .
+ This package contains the documentation.
