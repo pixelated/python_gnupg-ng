@@ -1,0 +1,11 @@
+--- a/docs/conf.py
++++ b/docs/conf.py
+@@ -37,7 +37,7 @@ extensions = ['sphinx.ext.autodoc',
+               'sphinx.ext.viewcode',
+               'sphinx.ext.intersphinx',
+               'sphinx.ext.doctest',
+-              'sphinxcontrib.fulltoc',
++              #'sphinxcontrib.fulltoc',
+           ]
+ 
+ # Add any paths that contain templates here, relative to this directory.
