@@ -57,7 +57,7 @@ Architecture: all
 Depends: ${misc:Depends}, ${sphinxdoc:Depends},
  python-setuptools (>= 0.6.45) | python3-setuptools (>=0.6.24),
  python-psutil | python3-psutil
-Description: Python wrapper for GnuPG
+Description: Python wrapper for GnuPG - documentation
  A Python interface for handling interactions with GnuPG, including keyfile
  generation, keyring maintenance, import and export, encryption and decryption,
  sending to and recieving from keyservers, and signing and verification.
