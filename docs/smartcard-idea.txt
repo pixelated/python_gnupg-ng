@@ -1,0 +1,10 @@
+>>> import gnupg
+>>> gpg = gnupg.GPG()
+>>> gpg.sc = gnupg.SmartCard()   ## this could be done in gnupg.GPG.__init__() too
+>>> gpg.sc.detected()
+True
+>>> gpg.sc.serialno()
+1234567890abcdef
+>>> gpg.sc.learn()
+<some card info data gets put into gpg.sc attributes>
+>>> gpg.sc.
