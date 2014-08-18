@@ -1,0 +1,236 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html><head><title>Using multiple subkeys in GPG</title></head><body style="background-color: white;">
+<div>[ <a href="http://fortytwo.ch/">main gpg page</a> ]
+<hr>
+<h1>Using multiple subkeys in GPG</h1>
+<hr>
+<h2>Motivation</h2>
+<p>
+For a time, I've had two different gpg keys - one at home on my presumably
+secure machine, one at the office, with NFS mounted home directory and
+quite a few people having accounts everywhere. This worked, but the problem
+is that when exchanging key signatures I always had to beg people to sign
+both my keys.
+</p>
+<p>
+With gpg and the possibility of having multiple subkeys, I can now have
+only one key, but still retain the security feature that I don't have to
+revoke my primary key (and lose all signatures on it) if the key at the
+office is compromised.
+</p>
+<p>
+<b>NOTE:</b> Most of the following can apply to both signing and encrypting
+subkeys. Encryption subkeys can not be used to solve the multiple accounts
+problem, though, please see the <a href="#problems">Problems</a> section
+further down. Also, note that I don't use multiple encryption subkeys, so I
+don't know if there are additional problems with them.
+</p>
+<p>
+The following is based on <b>gnupg 1.2.1</b>. It should all work with newer
+versions, too. Older versions do not support everything and have some
+additional problems. As I really do recommend you use a recent gpg version, I
+have omitted anything related to older gpg versions.
+</p>
+<h2>Basics</h2>
+<p>
+Generate a normal key pair, or use an existing key. Usually this will be a
+DSA/ElGamal key (this is what I use), but using RSA or other keys is
+equally possible. Be sure to do this on a 'really secure' machine.
+</p>
+<p>
+Then "<tt>gpg __edit <i>keyid</i></tt>" the key and add a further subkey
+using "<tt>addkey</tt>". "<tt>save</tt>" will store the new subkey on the
+keyring. You'll want to save the whole key (secret and public) with
+"<tt>gpg __export <i>keyid</i> &gt; pubkey</tt>" and "<tt>gpg
+__export-secret-key <i>keyid</i> &gt; seckey</tt>". Best copy those files
+onto an offline storage, too. (A basic working knowledge of how to use a
+command line and how to deal with files is assumed. Also, you should know
+a bit how key handling in gpg works. If you can't see what the above commands
+do, you better do <a href="http://www.gnupg.org/gph/en/manual.html">some
+reading</a> before continuing here).
+</p>
+<p>
+Now you should also <b>back up your keyrings</b>, as the following has to
+work on a keyring to work around some missing or broken gpg features.
+</p>
+<p>
+As you probably will only take one of the subkeys to your not-so-secure
+location, "<tt>gpg __edit <i>keyid</i></tt> and delete the subkeys you
+don't want to expose (mark them with "<tt>key <i>n</i></tt>" and then delete
+them with "<tt>delkey</tt>"). 
+</p>
+<p>
+"<tt>gpg __export-secret-subkeys <i>keyid</i> &gt; crippled.seckey</tt>"
+will then export the remaining subkeys, without the keymaterial of the
+primary key.
+</p>
+<p>
+Now, you can restore the keyrings (secret <em>and</em> public, since
+deleting the subkeys has also deleted the public subkeys!), and your secure
+machine is ready to use. Perhaps you don't want to use your 'insecure'
+subkey on your secure machine - again, "<tt>gpg __edit <i>keyid</i></tt>",
+"<tt>key <i>n</i></tt>" and "<tt>delkey</tt>" takes care of this; again, it
+is necessary to re-import the public key.
+</p>
+<p>
+On your 'insecure' machine, you do "<tt>gpg __import pubkey
+crippled.seckey</tt>" (the same files you've generated above), now you're ready
+to use gpg on the 'insecure' machine.  To verify that you really don't have any
+secret keys you don't want, have a look at the output of "<tt>gpg
+__list-secret-keys</tt>": all primary secret key where the key material is not 
+present are marked with '#'.
+</p>
+<pre>
+$ gpg __list-secret-key testuser
+sec<b>#</b> 1024D/971B7A70 2003-01-03 testuser &lt;testuser@mydomain.foo&gt;
+ssb  1024g/ACDF80C4 2003-01-03
+ssb  1024R/BE9CA308 2003-01-07
+</pre>
+<p>
+Of course, you'll have to publish your new public key, so people can
+verify your signatures and send you encrypted mail. Read the <a
+href="#problems">Problems</a> section for a few comments about this.
+</p>
+<h2>Effects</h2>
+<p>
+Keys are always signed with your primary key, so you (or any attacker) won't be
+able to sign other keys with the key on the 'insecure' machine.  This is why we
+started doing all this acrobatics after all.  </p>
+<p>
+You will always be able to revoke a subkey (just "<tt>gpg __edit
+<i>keyid</i></tt>", "<tt>key <i>n</i></tt>" and "<tt>revkey</tt>") when you
+have the primary secret key available, even if you lose your secret subkey.
+Meaning: you may use a secret subkey at an office location, and it is not
+strictly necessary to back it up on a secure location (It's still a good idea,
+though). The reason for this is that a revocation is really a signature on the
+subkey - and this signature is done with the primary key. Of course, this means
+that you can't revoke a subkey when you don't have the primary secret key.
+</p>
+<p>
+If you're signing documents, gpg will always try to use a subkey if one
+is available, and announce this with a message like "<tt>1024-bit DSA key, ID
+E5A7F7D6, created 2002-08-22 (main key ID 92082481)</tt>" . Verifying such
+signatures used to cause a similar message, but at least with gpg 1.2.3 no
+indication is given that the signature was made with a subkey. If you want to
+use a specific subkey (or the primary key), you have to specify it with the
+"<tt><i>keyid</i>!</tt>" syntax. I don't remember what happens if more than one
+signing subkey is available; I'm sure you can find details on this somewhere in
+the <a href="http://www.gnupg.org/documentation/mailing-lists.html">gnupg
+mailing list archives</a>.
+</p>
+<h2><a name="problems">Problems</a></h2>
+<p>
+The above approach has several problems that may lead to you not doing
+things like this. <b>These are not just possible problems. These are real,
+and <em>will</em> affect you! You have been warned.</b>
+</p>
+<p>
+First, distributing secret subkeys this way (one subkey for each
+account/machine you use) only makes sense with signing subkeys. You can have
+multiple encryption subkeys, but you can't force people sending you encrypted
+mail using a specific subkey. Naturally, if you're using encryption for
+yourself, you can chose the encryption key to use with the
+"<tt><i>keyid</i>!</tt>" syntax. The presence of multiple encryption subkeys
+is, however, useful if you revoke an older one to replace it with a new one.
+</p>
+<p>
+Old PGP versions apparently can't cope with such keys. I didn't verify this
+myself, but people on the gnupg-users mailing list said that current PGP
+versions (up to 7.x) can not verify signatures from a subkey. With PGP 8 the
+situation is a bit more complicated: PGP 8 can verify subkey signatures, but
+has still problems with multiple subkeys: a key with a signing subkey that is
+newer than the encryption subkey cannot be used for encryption in PGP 8.  A key
+where the encryption subkey is newer than the signing subkey can be used for
+encryption. So, when you create your key, generate it as 'signing only' key
+first, then generate all the signing subkeys you need, and in the end generate
+the encryption subkey. (Thanks to David Shaw for this info).
+</p>
+<p>
+Most keyservers can not handle keys with multiple subkeys. Some of them even
+make these keys unusable. This should get better soon, as JHarris has written a
+patch for the pks keyserver, and keyservers with other software that handles
+this are deployed more widely. The keyservers that can handle multiple subkeys
+are summarized as <tt>subkeys.pgp.net</tt>.
+GnuPG 1.2 added code to recover somewhat when a broken key is retrieved - one
+of the subkeys is useable (the others can't be used, as the signature binding
+the subkey to the primary is lost).
+</p>
+<p>
+Besides corrupting keys with multiple subkeys, all of these old keyservers
+will also only search keys based on the primary key id - so, automatic key
+retrieval on signature verification will not work, too.  Yet another
+reason to oonly use the subkeys.pgp.net keyservers.
+</p>
+<p>
+Finally, keyhandling is not comfortable with such keys - the user interface of
+gpg could be better. The following is valid for gpg 1.2.1, some things may be
+fixed in newer versions.:
+</p>
+<ul>
+<li>
+"<tt>gpg __import <i>secret key</i></tt>" does not merge the keys properly.
+If a secret key is already present, additional secret subkeys are not
+imported. Also, a dummy primary key is not replaced by the real subkey on
+import. Workaround is to shuffle around the keyrings, or do
+"<tt>__export</tt>"s at all stages and use "<tt>__delete-secret-key</tt>"
+often. (People with masochistic inclination may probably also use
+combinations of <tt>gpgsplit</tt>, <tt>cat</tt> and "<tt>gpg __export</tt>"
+and "<tt>__import</tt>. I've not tried this.)
+</li>
+<li>
+"<tt>gpg __export-secret-key <i>keyid</i>!</tt>" and <tt>gpg
+__export-secret-subkeys <i>keyid</i>!</tt>" should really only export the
+named subkey (or the primary stripped of all subkeys). Much keyring shuffling
+could be avoided. (<b>2003-02-12:</b>David Shaw added this to the development
+branch of the gpg code. Great!)
+</li>
+</ul>
+<h2>Links</h2>
+<p>
+Some additional reading that might be interesting:
+</p>
+<ul>
+<li>
+The <a href="http://www.ietf.org/rfc/rfc2440.txt">rfc2440</a>, specifying
+the OpenPGP key format.
+</li>
+<li>
+The <a href="http://www.gnupg.org/gph/en/manual.html">GNU Privacy Handbook</a>
+is a fairly complete manual to gpg.
+</li>
+<li>
+The <a
+href="http://lists.gnupg.org/pipermail/gnupg-users/2002-August/014721.html">using
+various subkeys</a> thread on the gnupg-users mailing list, where most of these
+issues were discussed.
+</li>
+<li>
+The <a
+href="http://lists.gnupg.org/pipermail/gnupg-devel/2002-September/007700.html">using
+subkey signatures</a> thread on gnupg-devel where I asked about the auto key
+retrieval problem.
+</li>
+<li>
+Other <a href="http://atom.smasher.org/gpg/">tutorials</a> on advanced black
+magic with keys by Atom Smasher, dealing with what you can do with subkeys.
+</li>
+</ul>
+<h2>Acknowledgments</h2>
+<p>
+Of course, thanks to the gnupg crew for the cool software, and especially to
+Werner Koch and David Shaw for replying to my initial questions about this. And
+to Jason Harris for fixing pks to accept keys with multiple subkeys, I hope
+this patch spreads really fast as soon as it is officially out.
+</p>
+<p>
+</p>
+</div>
+<hr>
+<div style="font-size: x-small;">
+©2002-2004 <a href="mailto:avbidder+gpg@fortytwo.ch">Adrian von Bidder</a>
+- Permission to redistribute and/or modify this document is granted if (i) the
+original author (Adrian von Bidder, Switzerland) is acknowledged and (ii) the
+document remains freely available for distribution and modification.
+</div>
+
+</body></html>

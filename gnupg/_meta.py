@@ -31,7 +31,9 @@ import encodings
 ## See https://code.patternsinthevoid.net/?p=android-locale-hack.git
 import locale
 import os
+import platform
 import psutil
+import shlex
 import subprocess
 import sys
 import threading
@@ -505,9 +507,16 @@ class GPGBase(object):
         """
         ## see http://docs.python.org/2/library/subprocess.html#converting-an\
         ##    -argument-sequence-to-a-string-on-windows
-        cmd = ' '.join(self._make_args(args, passphrase))
+        cmd = shlex.split(' '.join(self._make_args(args, passphrase)))
         log.debug("Sending command to GnuPG process:%s%s" % (os.linesep, cmd))
-        return subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE,
+
+        if platform.system() == "Windows":
+            # TODO figure out what the hell is going on there.
+            expand_shell = True
+        else:
+            expand_shell = False
+
+        return subprocess.Popen(cmd, shell=expand_shell, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 env={'LANGUAGE': 'en'})
 
@@ -757,10 +766,10 @@ class GPGBase(object):
                                   **recipients** keys. If False, display trust
                                   warnings. (default: True)
 
-        :param str output: The output file to write to. If not specified, the
-                           encrypted output is returned, and thus should be
-                           stored as an object in Python. For example:
-
+        :type output: str or file-like object
+        :param output: The output file to write to. If not specified, the
+                       encrypted output is returned, and thus should be stored
+                       as an object in Python. For example:
 
         >>> import shutil
         >>> import gnupg
@@ -799,17 +808,23 @@ class GPGBase(object):
         """
         args = []
 
+        ## FIXME: GnuPG appears to ignore the --output directive when being
+        ## programmatically driven. We'll handle the IO ourselves to fix this
+        ## for now.
+        output_filename = None
         if output:
             if getattr(output, 'fileno', None) is not None:
                 ## avoid overwrite confirmation message
-                if getattr(output, 'name', None) is None:
-                    if os.path.exists(output):
-                        os.remove(output)
-                    args.append('--output %s' % output)
-                else:
+                if getattr(output, 'name', None) is not None:
+                    output_filename = output.name
                     if os.path.exists(output.name):
                         os.remove(output.name)
-                    args.append('--output %s' % output.name)
+                    #args.append('--output %s' % output.name)
+            else:
+                output_filename = output
+                if os.path.exists(output):
+                    os.remove(output)
+                #args.append('--output %s' % output)
 
         if armor: args.append('--armor')
         if always_trust: args.append('--always-trust')
@@ -868,4 +883,12 @@ class GPGBase(object):
         self._handle_io(args, data, result,
                         passphrase=passphrase, binary=True)
         log.debug("\n%s" % result.data)
+
+        if output_filename:
+            log.info("Writing encrypted output to file: %s" % output_filename)
+            with open(output_filename, 'w+') as fh:
+                fh.write(result.data)
+                fh.flush()
+                log.info("Encrypted output written successfully.")
+
         return result

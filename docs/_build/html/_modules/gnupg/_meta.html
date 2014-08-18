@@ -1,0 +1,981 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>gnupg._meta &mdash; gnupg unknown documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/agogo.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     'unknown',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="top" title="gnupg unknown documentation" href="../../index.html" />
+    <link rel="up" title="gnupg" href="../gnupg.html" /> 
+  </head>
+  <body>
+    <div class="header-wrapper">
+      <div class="header">
+        <div class="headertitle"><a
+          href="../../index.html">gnupg: Python Module Documentation</a></div>
+        <div class="rel">
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a>
+        </div>
+       </div>
+    </div>
+
+    <div class="content-wrapper">
+      <div class="content">
+        <div class="document">
+            
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <h1>Source code for gnupg._meta</h1><div class="highlight"><pre>
+<span class="c"># -*- coding: utf-8 -*-</span>
+<span class="c">#</span>
+<span class="c"># This file is part of python-gnupg, a Python interface to GnuPG.</span>
+<span class="c"># Copyright © 2013 Isis Lovecruft, &lt;isis@leap.se&gt; 0xA3ADB67A2CDB8B35</span>
+<span class="c">#           © 2013 Andrej B.</span>
+<span class="c">#           © 2013 LEAP Encryption Access Project</span>
+<span class="c">#           © 2008-2012 Vinay Sajip</span>
+<span class="c">#           © 2005 Steve Traugott</span>
+<span class="c">#           © 2004 A.M. Kuchling</span>
+<span class="c">#</span>
+<span class="c"># This program is free software: you can redistribute it and/or modify it</span>
+<span class="c"># under the terms of the GNU General Public License as published by the Free</span>
+<span class="c"># Software Foundation, either version 3 of the License, or (at your option)</span>
+<span class="c"># any later version.</span>
+<span class="c">#</span>
+<span class="c"># This program is distributed in the hope that it will be useful, but WITHOUT</span>
+<span class="c"># ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or</span>
+<span class="c"># FITNESS FOR A PARTICULAR PURPOSE. See the included LICENSE file for details.</span>
+
+<span class="sd">&#39;&#39;&#39;Meta and base classes for hiding internal functions, and controlling</span>
+<span class="sd">attribute creation and handling.</span>
+<span class="sd">&#39;&#39;&#39;</span>
+
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">absolute_import</span>
+
+<span class="kn">import</span> <span class="nn">atexit</span>
+<span class="kn">import</span> <span class="nn">codecs</span>
+<span class="kn">import</span> <span class="nn">encodings</span>
+<span class="c">## For AOS, the locale module will need to point to a wrapper around the</span>
+<span class="c">## java.util.Locale class.</span>
+<span class="c">## See https://code.patternsinthevoid.net/?p=android-locale-hack.git</span>
+<span class="kn">import</span> <span class="nn">locale</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">platform</span>
+<span class="kn">import</span> <span class="nn">psutil</span>
+<span class="kn">import</span> <span class="nn">shlex</span>
+<span class="kn">import</span> <span class="nn">subprocess</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">_parsers</span>
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">_util</span>
+
+<span class="kn">from</span> <span class="nn">._parsers</span> <span class="kn">import</span> <span class="n">_check_preferences</span>
+<span class="kn">from</span> <span class="nn">._parsers</span> <span class="kn">import</span> <span class="n">_sanitise_list</span>
+<span class="kn">from</span> <span class="nn">._util</span>    <span class="kn">import</span> <span class="n">log</span>
+
+
+<div class="viewcode-block" id="GPGMeta"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGMeta">[docs]</a><span class="k">class</span> <span class="nc">GPGMeta</span><span class="p">(</span><span class="nb">type</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Metaclass for changing the :meth:GPG.__init__ initialiser.</span>
+
+<span class="sd">    Detects running gpg-agent processes and the presence of a pinentry</span>
+<span class="sd">    program, and disables pinentry so that python-gnupg can write the</span>
+<span class="sd">    passphrase to the controlled GnuPG process without killing the agent.</span>
+
+<span class="sd">    :attr _agent_proc: If a :program:`gpg-agent` process is currently running</span>
+<span class="sd">                       for the effective userid, then **_agent_proc** will be</span>
+<span class="sd">                       set to a ``psutil.Process`` for that process.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="GPGMeta.__new__"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGMeta.__new__">[docs]</a>    <span class="k">def</span> <span class="nf">__new__</span><span class="p">(</span><span class="n">cls</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">bases</span><span class="p">,</span> <span class="n">attrs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Construct the initialiser for GPG&quot;&quot;&quot;</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Metaclass __new__ constructor called for </span><span class="si">%r</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">cls</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cls</span><span class="o">.</span><span class="n">_find_agent</span><span class="p">():</span>
+            <span class="c">## call the normal GPG.__init__() initialiser:</span>
+            <span class="n">attrs</span><span class="p">[</span><span class="s">&#39;init&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cls</span><span class="o">.</span><span class="n">__init__</span>
+            <span class="n">attrs</span><span class="p">[</span><span class="s">&#39;_remove_agent&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">True</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">GPGMeta</span><span class="p">,</span> <span class="n">cls</span><span class="p">)</span><span class="o">.</span><span class="n">__new__</span><span class="p">(</span><span class="n">cls</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">bases</span><span class="p">,</span> <span class="n">attrs</span><span class="p">)</span>
+</div>
+    <span class="nd">@classmethod</span>
+<div class="viewcode-block" id="GPGMeta._find_agent"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGMeta._find_agent">[docs]</a>    <span class="k">def</span> <span class="nf">_find_agent</span><span class="p">(</span><span class="n">cls</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Discover if a gpg-agent process for the current euid is running.</span>
+
+<span class="sd">        If there is a matching gpg-agent process, set a :class:`psutil.Process`</span>
+<span class="sd">        instance containing the gpg-agent process&#39; information to</span>
+<span class="sd">        ``cls._agent_proc``.</span>
+
+<span class="sd">        :returns: True if there exists a gpg-agent process running under the</span>
+<span class="sd">                  same effective user ID as that of this program. Otherwise,</span>
+<span class="sd">                  returns None.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">identity</span> <span class="o">=</span> <span class="n">psutil</span><span class="o">.</span><span class="n">Process</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getpid</span><span class="p">())</span><span class="o">.</span><span class="n">uids</span>
+        <span class="k">for</span> <span class="n">proc</span> <span class="ow">in</span> <span class="n">psutil</span><span class="o">.</span><span class="n">process_iter</span><span class="p">():</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">proc</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s">&quot;gpg-agent&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">proc</span><span class="o">.</span><span class="n">is_running</span><span class="p">:</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Found gpg-agent process with pid </span><span class="si">%d</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">proc</span><span class="o">.</span><span class="n">pid</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">proc</span><span class="o">.</span><span class="n">uids</span> <span class="o">==</span> <span class="n">identity</span><span class="p">:</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                        <span class="s">&quot;Effective UIDs of this process and gpg-agent match&quot;</span><span class="p">)</span>
+                    <span class="nb">setattr</span><span class="p">(</span><span class="n">cls</span><span class="p">,</span> <span class="s">&#39;_agent_proc&#39;</span><span class="p">,</span> <span class="n">proc</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="bp">True</span>
+
+</div></div>
+<div class="viewcode-block" id="GPGBase"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase">[docs]</a><span class="k">class</span> <span class="nc">GPGBase</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Base class for storing properties and controlling process initialisation.</span>
+
+<span class="sd">    :const _result_map: A *dict* containing classes from</span>
+<span class="sd">                        :mod:`~gnupg._parsers`, used for parsing results</span>
+<span class="sd">                        obtained from GnuPG commands.</span>
+<span class="sd">    :const _decode_errors: How to handle encoding errors.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">__metaclass__</span>  <span class="o">=</span> <span class="n">GPGMeta</span>
+    <span class="n">_decode_errors</span> <span class="o">=</span> <span class="s">&#39;strict&#39;</span>
+    <span class="n">_result_map</span>    <span class="o">=</span> <span class="p">{</span> <span class="s">&#39;crypt&#39;</span><span class="p">:</span>    <span class="n">_parsers</span><span class="o">.</span><span class="n">Crypt</span><span class="p">,</span>
+                       <span class="s">&#39;delete&#39;</span><span class="p">:</span>   <span class="n">_parsers</span><span class="o">.</span><span class="n">DeleteResult</span><span class="p">,</span>
+                       <span class="s">&#39;generate&#39;</span><span class="p">:</span> <span class="n">_parsers</span><span class="o">.</span><span class="n">GenKey</span><span class="p">,</span>
+                       <span class="s">&#39;import&#39;</span><span class="p">:</span>   <span class="n">_parsers</span><span class="o">.</span><span class="n">ImportResult</span><span class="p">,</span>
+                       <span class="s">&#39;list&#39;</span><span class="p">:</span>     <span class="n">_parsers</span><span class="o">.</span><span class="n">ListKeys</span><span class="p">,</span>
+                       <span class="s">&#39;sign&#39;</span><span class="p">:</span>     <span class="n">_parsers</span><span class="o">.</span><span class="n">Sign</span><span class="p">,</span>
+                       <span class="s">&#39;verify&#39;</span><span class="p">:</span>   <span class="n">_parsers</span><span class="o">.</span><span class="n">Verify</span><span class="p">,</span>
+                       <span class="s">&#39;packets&#39;</span><span class="p">:</span>  <span class="n">_parsers</span><span class="o">.</span><span class="n">ListPackets</span> <span class="p">}</span>
+
+<div class="viewcode-block" id="GPGBase.__init__"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase.__init__">[docs]</a>    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">binary</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">home</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">keyring</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">secring</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">use_agent</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">default_preference_list</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">verbose</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create a ``GPGBase``.</span>
+
+<span class="sd">        This class is used to set up properties for controlling the behaviour</span>
+<span class="sd">        of configuring various options for GnuPG, such as setting GnuPG&#39;s</span>
+<span class="sd">        **homedir** , and the paths to its **binary** and **keyring** .</span>
+
+<span class="sd">        :const binary: (:obj:`str`) The full path to the GnuPG binary.</span>
+
+<span class="sd">        :ivar homedir: (:class:`~gnupg._util.InheritableProperty`) The full</span>
+<span class="sd">                       path to the current setting for the GnuPG</span>
+<span class="sd">                       ``--homedir``.</span>
+
+<span class="sd">        :ivar _generated_keys: (:class:`~gnupg._util.InheritableProperty`)</span>
+<span class="sd">                               Controls setting the directory for storing any</span>
+<span class="sd">                               keys which are generated with</span>
+<span class="sd">                               :meth:`~gnupg.GPG.gen_key`.</span>
+
+<span class="sd">        :ivar str keyring: The filename in **homedir** to use as the keyring</span>
+<span class="sd">                           file for public keys.</span>
+<span class="sd">        :ivar str secring: The filename in **homedir** to use as the keyring</span>
+<span class="sd">                           file for secret keys.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">binary</span>  <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">_find_binary</span><span class="p">(</span><span class="n">binary</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">homedir</span> <span class="o">=</span> <span class="n">home</span> <span class="k">if</span> <span class="n">home</span> <span class="k">else</span> <span class="n">_util</span><span class="o">.</span><span class="n">_conf</span>
+        <span class="n">pub</span> <span class="o">=</span> <span class="n">_parsers</span><span class="o">.</span><span class="n">_fix_unsafe</span><span class="p">(</span><span class="n">keyring</span><span class="p">)</span> <span class="k">if</span> <span class="n">keyring</span> <span class="k">else</span> <span class="s">&#39;pubring.gpg&#39;</span>
+        <span class="n">sec</span> <span class="o">=</span> <span class="n">_parsers</span><span class="o">.</span><span class="n">_fix_unsafe</span><span class="p">(</span><span class="n">secring</span><span class="p">)</span> <span class="k">if</span> <span class="n">secring</span> <span class="k">else</span> <span class="s">&#39;secring.gpg&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">keyring</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_homedir</span><span class="p">,</span> <span class="n">pub</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">secring</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_homedir</span><span class="p">,</span> <span class="n">sec</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">options</span> <span class="o">=</span> <span class="n">_parsers</span><span class="o">.</span><span class="n">_sanitise</span><span class="p">(</span><span class="n">options</span><span class="p">)</span> <span class="k">if</span> <span class="n">options</span> <span class="k">else</span> <span class="bp">None</span>
+
+        <span class="k">if</span> <span class="n">default_preference_list</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_prefs</span> <span class="o">=</span> <span class="n">_check_preferences</span><span class="p">(</span><span class="n">default_preference_list</span><span class="p">,</span> <span class="s">&#39;all&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_prefs</span>  <span class="o">=</span> <span class="s">&#39;SHA512 SHA384 SHA256 AES256 CAMELLIA256 TWOFISH&#39;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_prefs</span> <span class="o">+=</span> <span class="s">&#39; AES192 ZLIB ZIP Uncompressed&#39;</span>
+
+        <span class="n">encoding</span> <span class="o">=</span> <span class="n">locale</span><span class="o">.</span><span class="n">getpreferredencoding</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">encoding</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span> <span class="c"># This happens on Jython!</span>
+            <span class="n">encoding</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">stdin</span><span class="o">.</span><span class="n">encoding</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_encoding</span> <span class="o">=</span> <span class="n">encoding</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s">&#39;-&#39;</span><span class="p">,</span> <span class="s">&#39;_&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_filesystemencoding</span> <span class="o">=</span> <span class="n">encodings</span><span class="o">.</span><span class="n">normalize_encoding</span><span class="p">(</span>
+            <span class="n">sys</span><span class="o">.</span><span class="n">getfilesystemencoding</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">())</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_keyserver</span> <span class="o">=</span> <span class="s">&#39;hkp://wwwkeys.pgp.net&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__generated_keys</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">homedir</span><span class="p">,</span> <span class="s">&#39;generated-keys&#39;</span><span class="p">)</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">binary</span><span class="p">,</span> <span class="s">&quot;Could not find binary </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">binary</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">verbose</span><span class="p">,</span> <span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">)),</span> \
+                <span class="s">&quot;&#39;verbose&#39; must be boolean, string, or 0 &lt;= n &lt;= 9&quot;</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">use_agent</span><span class="p">,</span> <span class="nb">bool</span><span class="p">),</span> <span class="s">&quot;&#39;use_agent&#39; must be boolean&quot;</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">options</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">options</span><span class="p">,</span> <span class="nb">str</span><span class="p">),</span> <span class="s">&quot;options not string&quot;</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AssertionError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">)</span> <span class="k">as</span> <span class="n">ae</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s">&quot;GPGBase.__init__(): </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="nb">str</span><span class="p">(</span><span class="n">ae</span><span class="p">))</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">ae</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">verbose</span> <span class="ow">is</span> <span class="bp">True</span><span class="p">:</span>
+                <span class="c"># The caller wants logging, but we need a valid --debug-level</span>
+                <span class="c"># for gpg. Default to &quot;basic&quot;, and warn about the ambiguity.</span>
+                <span class="c"># (garrettr)</span>
+                <span class="n">verbose</span> <span class="o">=</span> <span class="s">&quot;basic&quot;</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s">&#39;GPG(verbose=True) is ambiguous, defaulting to &quot;basic&quot; logging&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span> <span class="o">=</span> <span class="n">verbose</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">use_agent</span> <span class="o">=</span> <span class="n">use_agent</span>
+
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">&#39;_agent_proc&#39;</span><span class="p">)</span> \
+                <span class="ow">and</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">&#39;_remove_agent&#39;</span><span class="p">,</span> <span class="bp">None</span><span class="p">)</span> <span class="ow">is</span> <span class="bp">True</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">&#39;__remove_path__&#39;</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">__remove_path__</span><span class="p">(</span><span class="s">&#39;pinentry&#39;</span><span class="p">)</span>
+</div>
+<div class="viewcode-block" id="GPGBase.__remove_path__"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase.__remove_path__">[docs]</a>    <span class="k">def</span> <span class="nf">__remove_path__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">prog</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">at_exit</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Remove the directories containing a program from the system&#39;s</span>
+<span class="sd">        ``$PATH``. If ``GPGBase.binary`` is in a directory being removed, it</span>
+<span class="sd">        is linked to :file:&#39;./gpg&#39; in the current directory.</span>
+
+<span class="sd">        :param str prog: The program to remove from ``$PATH``.</span>
+<span class="sd">        :param bool at_exit: Add the program back into the ``$PATH`` when the</span>
+<span class="sd">                             Python interpreter exits, and delete any symlinks</span>
+<span class="sd">                             to ``GPGBase.binary`` which were created.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c">#: A list of ``$PATH`` entries which were removed to disable pinentry.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_removed_path_entries</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Attempting to remove </span><span class="si">%s</span><span class="s"> from system PATH&quot;</span> <span class="o">%</span> <span class="nb">str</span><span class="p">(</span><span class="n">prog</span><span class="p">))</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">prog</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">prog</span><span class="p">,</span> <span class="nb">str</span><span class="p">)):</span> <span class="k">return</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">program</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">_which</span><span class="p">(</span><span class="n">prog</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">OSError</span><span class="p">,</span> <span class="ne">IOError</span><span class="p">,</span> <span class="ne">IndexError</span><span class="p">)</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">err</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">err</span><span class="p">))</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">err</span><span class="p">(</span><span class="s">&quot;Cannot find program &#39;</span><span class="si">%s</span><span class="s">&#39;, not changing PATH.&quot;</span> <span class="o">%</span> <span class="n">prog</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="c">## __remove_path__ cannot be an @classmethod in GPGMeta, because</span>
+        <span class="c">## the use_agent attribute must be set by the instance.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_agent</span><span class="p">:</span>
+            <span class="n">program_base</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">prog</span><span class="p">)</span>
+            <span class="n">gnupg_base</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">binary</span><span class="p">)</span>
+
+            <span class="c">## symlink our gpg binary into $PWD if the path we are removing is</span>
+            <span class="c">## the one which contains our gpg executable:</span>
+            <span class="n">new_gpg_location</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getcwd</span><span class="p">(),</span> <span class="s">&#39;gpg&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">gnupg_base</span> <span class="o">==</span> <span class="n">program_base</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">symlink</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">binary</span><span class="p">,</span> <span class="n">new_gpg_location</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">new_gpg_location</span>
+
+            <span class="c">## copy the original environment so that we can put it back later:</span>
+            <span class="n">env_copy</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span>            <span class="c">## this one should not be touched</span>
+            <span class="n">path_copy</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s">&#39;PATH&#39;</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Created a copy of system PATH: </span><span class="si">%r</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">path_copy</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">has_key</span><span class="p">(</span><span class="s">&#39;PATH&#39;</span><span class="p">),</span> <span class="s">&quot;OS env kept $PATH anyway!&quot;</span>
+
+            <span class="nd">@staticmethod</span>
+            <span class="k">def</span> <span class="nf">remove_program_from_path</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">prog_base</span><span class="p">):</span>
+                <span class="sd">&quot;&quot;&quot;Remove all directories which contain a program from PATH.</span>
+
+<span class="sd">                :param str path: The contents of the system environment&#39;s</span>
+<span class="sd">                                 ``$PATH``.</span>
+
+<span class="sd">                :param str prog_base: The directory portion of a program&#39;s</span>
+<span class="sd">                                      location, without the trailing slash,</span>
+<span class="sd">                                      and without the program name. For</span>
+<span class="sd">                                      example, ``prog_base=&#39;/usr/bin&#39;``.</span>
+<span class="sd">                &quot;&quot;&quot;</span>
+                <span class="n">paths</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s">&#39;:&#39;</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">directory</span> <span class="ow">in</span> <span class="n">paths</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">directory</span> <span class="o">==</span> <span class="n">prog_base</span><span class="p">:</span>
+                        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Found directory with target program: </span><span class="si">%s</span><span class="s">&quot;</span>
+                                  <span class="o">%</span> <span class="n">directory</span><span class="p">)</span>
+                        <span class="n">path</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">directory</span><span class="p">)</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_removed_path_entries</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">directory</span><span class="p">)</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Deleted all found instance of </span><span class="si">%s</span><span class="s">.&quot;</span> <span class="o">%</span> <span class="n">directory</span><span class="p">)</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;PATH is now:</span><span class="si">%s%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">linesep</span><span class="p">,</span> <span class="n">path</span><span class="p">))</span>
+                <span class="n">new_path</span> <span class="o">=</span> <span class="s">&#39;:&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">path</span><span class="p">])</span>
+                <span class="k">return</span> <span class="n">new_path</span>
+
+            <span class="nd">@staticmethod</span>
+            <span class="k">def</span> <span class="nf">update_path</span><span class="p">(</span><span class="n">environment</span><span class="p">,</span> <span class="n">path</span><span class="p">):</span>
+                <span class="sd">&quot;&quot;&quot;Add paths to the string at ``os.environ[&#39;PATH&#39;]``.</span>
+
+<span class="sd">                :param str environment: The environment mapping to update.</span>
+<span class="sd">                :param list path: A list of strings to update the PATH with.</span>
+<span class="sd">                &quot;&quot;&quot;</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Updating system path...&quot;</span><span class="p">)</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">environ</span> <span class="o">=</span> <span class="n">environment</span>
+                <span class="n">new_path</span> <span class="o">=</span> <span class="s">&#39;:&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">path</span><span class="p">])</span>
+                <span class="n">old</span> <span class="o">=</span> <span class="s">&#39;&#39;</span>
+                <span class="k">if</span> <span class="s">&#39;PATH&#39;</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">:</span>
+                    <span class="n">new_path</span> <span class="o">=</span> <span class="s">&#39;:&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s">&#39;PATH&#39;</span><span class="p">],</span> <span class="n">new_path</span><span class="p">])</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s">&#39;PATH&#39;</span><span class="p">:</span> <span class="n">new_path</span><span class="p">})</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;System $PATH: </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s">&#39;PATH&#39;</span><span class="p">])</span>
+
+            <span class="n">modified_path</span> <span class="o">=</span> <span class="n">remove_program_from_path</span><span class="p">(</span><span class="n">path_copy</span><span class="p">,</span> <span class="n">program_base</span><span class="p">)</span>
+            <span class="n">update_path</span><span class="p">(</span><span class="n">env_copy</span><span class="p">,</span> <span class="n">modified_path</span><span class="p">)</span>
+
+            <span class="c">## register an _exithandler with the python interpreter:</span>
+            <span class="n">atexit</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">update_path</span><span class="p">,</span> <span class="n">env_copy</span><span class="p">,</span> <span class="n">path_copy</span><span class="p">)</span>
+
+            <span class="k">def</span> <span class="nf">remove_symlinked_binary</span><span class="p">(</span><span class="n">symlink</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">islink</span><span class="p">(</span><span class="n">symlink</span><span class="p">):</span>
+                    <span class="n">os</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">symlink</span><span class="p">)</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Removed binary symlink &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span> <span class="o">%</span> <span class="n">symlink</span><span class="p">)</span>
+            <span class="n">atexit</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">remove_symlinked_binary</span><span class="p">,</span> <span class="n">new_gpg_location</span><span class="p">)</span>
+</div>
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">default_preference_list</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the default preference list.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prefs</span>
+
+    <span class="nd">@default_preference_list.setter</span>
+    <span class="k">def</span> <span class="nf">default_preference_list</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">prefs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set the default preference list.</span>
+
+<span class="sd">        :param str prefs: A string containing the default preferences for</span>
+<span class="sd">                          ciphers, digests, and compression algorithms.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">prefs</span> <span class="o">=</span> <span class="n">_check_preferences</span><span class="p">(</span><span class="n">prefs</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">prefs</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_prefs</span> <span class="o">=</span> <span class="n">prefs</span>
+
+    <span class="nd">@default_preference_list.deleter</span>
+<div class="viewcode-block" id="GPGBase.default_preference_list"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase.default_preference_list">[docs]</a>    <span class="k">def</span> <span class="nf">default_preference_list</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Reset the default preference list to its original state.</span>
+
+<span class="sd">        Note that &quot;original state&quot; does not mean the default preference</span>
+<span class="sd">        list for whichever version of GnuPG is being used. It means the</span>
+<span class="sd">        default preference list defined by :attr:`GPGBase._prefs`.</span>
+
+<span class="sd">        Using BZIP2 is avoided due to not interacting well with some versions</span>
+<span class="sd">        of GnuPG&gt;=2.0.0.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_prefs</span> <span class="o">=</span> <span class="s">&#39;SHA512 SHA384 SHA256 AES256 CAMELLIA256 TWOFISH ZLIB ZIP&#39;</span>
+</div>
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">keyserver</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the current keyserver setting.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_keyserver</span>
+
+    <span class="nd">@keyserver.setter</span>
+    <span class="k">def</span> <span class="nf">keyserver</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">location</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set the default keyserver to use for sending and receiving keys.</span>
+
+<span class="sd">        The ``location`` is sent to :func:`_parsers._check_keyserver` when</span>
+<span class="sd">        option are parsed in :meth:`gnupg.GPG._make_options`.</span>
+
+<span class="sd">        :param str location: A string containing the default keyserver. This</span>
+<span class="sd">                             should contain the desired keyserver protocol</span>
+<span class="sd">                             which is supported by the keyserver, for example,</span>
+<span class="sd">                             ``&#39;hkps://keys.mayfirst.org&#39;``. The default</span>
+<span class="sd">                             keyserver is ``&#39;hkp://wwwkeys.pgp.net&#39;``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_keyserver</span> <span class="o">=</span> <span class="n">location</span>
+
+    <span class="nd">@keyserver.deleter</span>
+<div class="viewcode-block" id="GPGBase.keyserver"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase.keyserver">[docs]</a>    <span class="k">def</span> <span class="nf">keyserver</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Reset the keyserver to the default setting.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_keyserver</span> <span class="o">=</span> <span class="s">&#39;hkp://wwwkeys.pgp.net&#39;</span>
+</div>
+<div class="viewcode-block" id="GPGBase._homedir_getter"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._homedir_getter">[docs]</a>    <span class="k">def</span> <span class="nf">_homedir_getter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the directory currently being used as GnuPG&#39;s homedir.</span>
+
+<span class="sd">        If unspecified, use :file:`~/.config/python-gnupg/`</span>
+
+<span class="sd">        :rtype: str</span>
+<span class="sd">        :returns: The absolute path to the current GnuPG homedir.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_homedir</span>
+</div>
+<div class="viewcode-block" id="GPGBase._homedir_setter"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._homedir_setter">[docs]</a>    <span class="k">def</span> <span class="nf">_homedir_setter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">directory</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set the directory to use as GnuPG&#39;s homedir.</span>
+
+<span class="sd">        If unspecified, use $HOME/.config/python-gnupg. If specified, ensure</span>
+<span class="sd">        that the ``directory`` does not contain various shell escape</span>
+<span class="sd">        characters. If ``directory`` is not found, it will be automatically</span>
+<span class="sd">        created. Lastly, the ``direcory`` will be checked that the EUID has</span>
+<span class="sd">        read and write permissions for it.</span>
+
+<span class="sd">        :param str directory: A relative or absolute path to the directory to</span>
+<span class="sd">                            use for storing/accessing GnuPG&#39;s files, including</span>
+<span class="sd">                            keyrings and the trustdb.</span>
+<span class="sd">        :raises: :exc:`~exceptions.RuntimeError` if unable to find a suitable</span>
+<span class="sd">                 directory to use.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">directory</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase._homedir_setter(): Using default homedir: &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span>
+                      <span class="o">%</span> <span class="n">_util</span><span class="o">.</span><span class="n">_conf</span><span class="p">)</span>
+            <span class="n">directory</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">_conf</span>
+
+        <span class="n">hd</span> <span class="o">=</span> <span class="n">_parsers</span><span class="o">.</span><span class="n">_fix_unsafe</span><span class="p">(</span><span class="n">directory</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase._homedir_setter(): got directory &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span> <span class="o">%</span> <span class="n">hd</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">hd</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase._homedir_setter(): Check existence of &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span> <span class="o">%</span> <span class="n">hd</span><span class="p">)</span>
+            <span class="n">_util</span><span class="o">.</span><span class="n">_create_if_necessary</span><span class="p">(</span><span class="n">hd</span><span class="p">)</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase._homedir_setter(): checking permissions&quot;</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">_util</span><span class="o">.</span><span class="n">_has_readwrite</span><span class="p">(</span><span class="n">hd</span><span class="p">),</span> \
+                <span class="s">&quot;Homedir &#39;</span><span class="si">%s</span><span class="s">&#39; needs read/write permissions&quot;</span> <span class="o">%</span> <span class="n">hd</span>
+        <span class="k">except</span> <span class="ne">AssertionError</span> <span class="k">as</span> <span class="n">ae</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span><span class="s">&quot;Unable to set &#39;</span><span class="si">%s</span><span class="s">&#39; as GnuPG homedir&quot;</span> <span class="o">%</span> <span class="n">directory</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase.homedir.setter(): </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">msg</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">ae</span><span class="p">))</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">ae</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">&quot;Setting homedir to &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span> <span class="o">%</span> <span class="n">hd</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_homedir</span> <span class="o">=</span> <span class="n">hd</span>
+</div>
+    <span class="n">homedir</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">InheritableProperty</span><span class="p">(</span><span class="n">_homedir_getter</span><span class="p">,</span> <span class="n">_homedir_setter</span><span class="p">)</span>
+
+<div class="viewcode-block" id="GPGBase._generated_keys_getter"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._generated_keys_getter">[docs]</a>    <span class="k">def</span> <span class="nf">_generated_keys_getter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get the ``homedir`` subdirectory for storing generated keys.</span>
+
+<span class="sd">        :rtype: str</span>
+<span class="sd">        :returns: The absolute path to the current GnuPG homedir.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__generated_keys</span>
+</div>
+<div class="viewcode-block" id="GPGBase._generated_keys_setter"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._generated_keys_setter">[docs]</a>    <span class="k">def</span> <span class="nf">_generated_keys_setter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">directory</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set the directory for storing generated keys.</span>
+
+<span class="sd">        If unspecified, use</span>
+<span class="sd">        :meth:`~gnupg._meta.GPGBase.homedir`/generated-keys. If specified,</span>
+<span class="sd">        ensure that the ``directory`` does not contain various shell escape</span>
+<span class="sd">        characters. If ``directory`` isn&#39;t found, it will be automatically</span>
+<span class="sd">        created. Lastly, the ``directory`` will be checked to ensure that the</span>
+<span class="sd">        current EUID has read and write permissions for it.</span>
+
+<span class="sd">        :param str directory: A relative or absolute path to the directory to</span>
+<span class="sd">             use for storing/accessing GnuPG&#39;s files, including keyrings and</span>
+<span class="sd">             the trustdb.</span>
+<span class="sd">        :raises: :exc:`~exceptions.RuntimeError` if unable to find a suitable</span>
+<span class="sd">             directory to use.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">directory</span><span class="p">:</span>
+            <span class="n">directory</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">homedir</span><span class="p">,</span> <span class="s">&#39;generated-keys&#39;</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase._generated_keys_setter(): Using &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span>
+                      <span class="o">%</span> <span class="n">directory</span><span class="p">)</span>
+
+        <span class="n">hd</span> <span class="o">=</span> <span class="n">_parsers</span><span class="o">.</span><span class="n">_fix_unsafe</span><span class="p">(</span><span class="n">directory</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase._generated_keys_setter(): got directory &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span> <span class="o">%</span> <span class="n">hd</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">hd</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase._generated_keys_setter(): Check exists &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span>
+                      <span class="o">%</span> <span class="n">hd</span><span class="p">)</span>
+            <span class="n">_util</span><span class="o">.</span><span class="n">_create_if_necessary</span><span class="p">(</span><span class="n">hd</span><span class="p">)</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase._generated_keys_setter(): check permissions&quot;</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">_util</span><span class="o">.</span><span class="n">_has_readwrite</span><span class="p">(</span><span class="n">hd</span><span class="p">),</span> \
+                <span class="s">&quot;Keys dir &#39;</span><span class="si">%s</span><span class="s">&#39; needs read/write permissions&quot;</span> <span class="o">%</span> <span class="n">hd</span>
+        <span class="k">except</span> <span class="ne">AssertionError</span> <span class="k">as</span> <span class="n">ae</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span><span class="s">&quot;Unable to set &#39;</span><span class="si">%s</span><span class="s">&#39; as generated keys dir&quot;</span> <span class="o">%</span> <span class="n">directory</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPGBase._generated_keys_setter(): </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">msg</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">ae</span><span class="p">))</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">ae</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">&quot;Setting homedir to &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span> <span class="o">%</span> <span class="n">hd</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__generated_keys</span> <span class="o">=</span> <span class="n">hd</span>
+</div>
+    <span class="n">_generated_keys</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">InheritableProperty</span><span class="p">(</span><span class="n">_generated_keys_getter</span><span class="p">,</span>
+                                                <span class="n">_generated_keys_setter</span><span class="p">)</span>
+
+<div class="viewcode-block" id="GPGBase._make_args"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._make_args">[docs]</a>    <span class="k">def</span> <span class="nf">_make_args</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">passphrase</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Make a list of command line elements for GPG.</span>
+
+<span class="sd">        The value of ``args`` will be appended only if it passes the checks in</span>
+<span class="sd">        :func:`gnupg._parsers._sanitise`. The ``passphrase`` argument needs to</span>
+<span class="sd">        be True if a passphrase will be sent to GnuPG, else False.</span>
+
+<span class="sd">        :param list args: A list of strings of options and flags to pass to</span>
+<span class="sd">                          ``GPG.binary``. This is input safe, meaning that</span>
+<span class="sd">                          these values go through strict checks (see</span>
+<span class="sd">                          ``parsers._sanitise_list``) before being passed to to</span>
+<span class="sd">                          the input file descriptor for the GnuPG process.</span>
+<span class="sd">                          Each string should be given exactly as it would be on</span>
+<span class="sd">                          the commandline interface to GnuPG,</span>
+<span class="sd">                          e.g. [&quot;--cipher-algo AES256&quot;, &quot;--default-key</span>
+<span class="sd">                          A3ADB67A2CDB8B35&quot;].</span>
+
+<span class="sd">        :param bool passphrase: If True, the passphrase will be sent to the</span>
+<span class="sd">                                stdin file descriptor for the attached GnuPG</span>
+<span class="sd">                                process.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c">## see TODO file, tag :io:makeargs:</span>
+        <span class="n">cmd</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">binary</span><span class="p">,</span>
+               <span class="s">&#39;--no-options --no-emit-version --no-tty --status-fd 2&#39;</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">homedir</span><span class="p">:</span> <span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--homedir &quot;</span><span class="si">%s</span><span class="s">&quot;&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">homedir</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">keyring</span><span class="p">:</span>
+            <span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--no-default-keyring --keyring </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">keyring</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">secring</span><span class="p">:</span>
+            <span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--secret-keyring </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">secring</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">passphrase</span><span class="p">:</span> <span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--batch --passphrase-fd 0&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_agent</span><span class="p">:</span> <span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--use-agent&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span> <span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--no-use-agent&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">options</span><span class="p">:</span>
+            <span class="p">[</span><span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">opt</span><span class="p">)</span> <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="nb">iter</span><span class="p">(</span><span class="n">_sanitise_list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">options</span><span class="p">))]</span>
+        <span class="k">if</span> <span class="n">args</span><span class="p">:</span>
+            <span class="p">[</span><span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span> <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="nb">iter</span><span class="p">(</span><span class="n">_sanitise_list</span><span class="p">(</span><span class="n">args</span><span class="p">))]</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">:</span>
+            <span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--debug-all&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">((</span><span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span>
+                 <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span> <span class="ow">in</span> <span class="p">[</span><span class="s">&#39;basic&#39;</span><span class="p">,</span> <span class="s">&#39;advanced&#39;</span><span class="p">,</span> <span class="s">&#39;expert&#39;</span><span class="p">,</span> <span class="s">&#39;guru&#39;</span><span class="p">])</span>
+                <span class="ow">or</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;=</span><span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="o">&lt;=</span><span class="mi">9</span><span class="p">))):</span>
+                <span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--debug-level </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">cmd</span>
+</div>
+<div class="viewcode-block" id="GPGBase._open_subprocess"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._open_subprocess">[docs]</a>    <span class="k">def</span> <span class="nf">_open_subprocess</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">passphrase</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Open a pipe to a GPG subprocess and return the file objects for</span>
+<span class="sd">        communicating with it.</span>
+
+<span class="sd">        :param list args: A list of strings of options and flags to pass to</span>
+<span class="sd">                          ``GPG.binary``. This is input safe, meaning that</span>
+<span class="sd">                          these values go through strict checks (see</span>
+<span class="sd">                          ``parsers._sanitise_list``) before being passed to to</span>
+<span class="sd">                          the input file descriptor for the GnuPG process.</span>
+<span class="sd">                          Each string should be given exactly as it would be on</span>
+<span class="sd">                          the commandline interface to GnuPG,</span>
+<span class="sd">                          e.g. [&quot;--cipher-algo AES256&quot;, &quot;--default-key</span>
+<span class="sd">                          A3ADB67A2CDB8B35&quot;].</span>
+
+<span class="sd">        :param bool passphrase: If True, the passphrase will be sent to the</span>
+<span class="sd">                                stdin file descriptor for the attached GnuPG</span>
+<span class="sd">                                process.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c">## see http://docs.python.org/2/library/subprocess.html#converting-an\</span>
+        <span class="c">##    -argument-sequence-to-a-string-on-windows</span>
+        <span class="n">cmd</span> <span class="o">=</span> <span class="n">shlex</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_make_args</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">passphrase</span><span class="p">)))</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Sending command to GnuPG process:</span><span class="si">%s%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">linesep</span><span class="p">,</span> <span class="n">cmd</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="n">platform</span><span class="o">.</span><span class="n">system</span><span class="p">()</span> <span class="o">==</span> <span class="s">&quot;Windows&quot;</span><span class="p">:</span>
+            <span class="c"># TODO figure out what the hell is going on there.</span>
+            <span class="n">expand_shell</span> <span class="o">=</span> <span class="bp">True</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">expand_shell</span> <span class="o">=</span> <span class="bp">False</span>
+
+        <span class="k">return</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span> <span class="n">shell</span><span class="o">=</span><span class="n">expand_shell</span><span class="p">,</span> <span class="n">stdin</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+                                <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span> <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+                                <span class="n">env</span><span class="o">=</span><span class="p">{</span><span class="s">&#39;LANGUAGE&#39;</span><span class="p">:</span> <span class="s">&#39;en&#39;</span><span class="p">})</span>
+</div>
+<div class="viewcode-block" id="GPGBase._read_response"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._read_response">[docs]</a>    <span class="k">def</span> <span class="nf">_read_response</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stream</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Reads all the stderr output from GPG, taking notice only of lines</span>
+<span class="sd">        that begin with the magic [GNUPG:] prefix.</span>
+
+<span class="sd">        Calls methods on the response object for each valid token found, with</span>
+<span class="sd">        the arg being the remainder of the status line.</span>
+
+<span class="sd">        :param stream: A byte-stream, file handle, or a</span>
+<span class="sd">                       :data:`subprocess.PIPE` for parsing the status codes</span>
+<span class="sd">                       from the GnuPG process.</span>
+
+<span class="sd">        :param result: The result parser class from :mod:`~gnupg._parsers` ―</span>
+<span class="sd">                       the ``handle_status()`` method of that class will be</span>
+<span class="sd">                       called in order to parse the output of ``stream``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+            <span class="n">line</span> <span class="o">=</span> <span class="n">stream</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">line</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">break</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+            <span class="n">line</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">rstrip</span><span class="p">()</span>
+
+            <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s">&#39;[GNUPG:]&#39;</span><span class="p">):</span>
+                <span class="n">line</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">_deprefix</span><span class="p">(</span><span class="n">line</span><span class="p">,</span> <span class="s">&#39;[GNUPG:] &#39;</span><span class="p">,</span> <span class="n">log</span><span class="o">.</span><span class="n">status</span><span class="p">)</span>
+                <span class="n">keyword</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">_separate_keyword</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+                <span class="n">result</span><span class="o">.</span><span class="n">_handle_status</span><span class="p">(</span><span class="n">keyword</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s">&#39;gpg:&#39;</span><span class="p">):</span>
+                <span class="n">line</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">_deprefix</span><span class="p">(</span><span class="n">line</span><span class="p">,</span> <span class="s">&#39;gpg: &#39;</span><span class="p">)</span>
+                <span class="n">keyword</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">_separate_keyword</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+
+                <span class="c"># Log gpg&#39;s userland messages at our own levels:</span>
+                <span class="k">if</span> <span class="n">keyword</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s">&quot;WARNING&quot;</span><span class="p">):</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s">&quot;</span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">value</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="n">keyword</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s">&quot;FATAL&quot;</span><span class="p">):</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">critical</span><span class="p">(</span><span class="s">&quot;</span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">value</span><span class="p">)</span>
+                    <span class="c"># Handle the gpg2 error where a missing trustdb.gpg is,</span>
+                    <span class="c"># for some stupid reason, considered fatal:</span>
+                    <span class="k">if</span> <span class="n">value</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s">&quot;trustdb.gpg&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">value</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s">&quot;No such file&quot;</span><span class="p">):</span>
+                        <span class="n">result</span><span class="o">.</span><span class="n">_handle_status</span><span class="p">(</span><span class="s">&#39;NEED_TRUSTDB&#39;</span><span class="p">,</span> <span class="s">&#39;&#39;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">:</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">&quot;</span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">line</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;</span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">line</span><span class="p">)</span>
+        <span class="n">result</span><span class="o">.</span><span class="n">stderr</span> <span class="o">=</span> <span class="s">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</div>
+<div class="viewcode-block" id="GPGBase._read_data"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._read_data">[docs]</a>    <span class="k">def</span> <span class="nf">_read_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stream</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Incrementally read from ``stream`` and store read data.</span>
+
+<span class="sd">        All data gathered from calling ``stream.read()`` will be concatenated</span>
+<span class="sd">        and stored as ``result.data``.</span>
+
+<span class="sd">        :param stream: An open file-like object to read() from.</span>
+<span class="sd">        :param result: An instance of one of the :ref:`result parsing classes</span>
+<span class="sd">            &lt;parsers&gt;` from :const:`~gnupg._meta.GPGBase._result_map`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">chunks</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Reading data from stream </span><span class="si">%r</span><span class="s">...&quot;</span> <span class="o">%</span> <span class="n">stream</span><span class="o">.</span><span class="n">__repr__</span><span class="p">())</span>
+
+        <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">stream</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">break</span>
+            <span class="n">chunks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Read </span><span class="si">%4d</span><span class="s"> bytes&quot;</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
+
+        <span class="c"># Join using b&#39;&#39; or &#39;&#39;, as appropriate</span>
+        <span class="n">result</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="nb">type</span><span class="p">(</span><span class="n">data</span><span class="p">)()</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">chunks</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Finishing reading from stream </span><span class="si">%r</span><span class="s">...&quot;</span> <span class="o">%</span> <span class="n">stream</span><span class="o">.</span><span class="n">__repr__</span><span class="p">())</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Read </span><span class="si">%4d</span><span class="s"> bytes total&quot;</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">data</span><span class="p">))</span>
+</div>
+<div class="viewcode-block" id="GPGBase._collect_output"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._collect_output">[docs]</a>    <span class="k">def</span> <span class="nf">_collect_output</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">process</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">writer</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">stdin</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Drain the subprocesses output streams, writing the collected output</span>
+<span class="sd">        to the result. If a writer thread (writing to the subprocess) is given,</span>
+<span class="sd">        make sure it&#39;s joined before returning. If a stdin stream is given,</span>
+<span class="sd">        close it before returning.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">stderr</span> <span class="o">=</span> <span class="n">codecs</span><span class="o">.</span><span class="n">getreader</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_encoding</span><span class="p">)(</span><span class="n">process</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="n">rr</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_read_response</span><span class="p">,</span>
+                              <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span> <span class="n">result</span><span class="p">))</span>
+        <span class="n">rr</span><span class="o">.</span><span class="n">setDaemon</span><span class="p">(</span><span class="bp">True</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&#39;stderr reader: </span><span class="si">%r</span><span class="s">&#39;</span><span class="p">,</span> <span class="n">rr</span><span class="p">)</span>
+        <span class="n">rr</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+
+        <span class="n">stdout</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">stdout</span>
+        <span class="n">dr</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_read_data</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">stdout</span><span class="p">,</span> <span class="n">result</span><span class="p">))</span>
+        <span class="n">dr</span><span class="o">.</span><span class="n">setDaemon</span><span class="p">(</span><span class="bp">True</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&#39;stdout reader: </span><span class="si">%r</span><span class="s">&#39;</span><span class="p">,</span> <span class="n">dr</span><span class="p">)</span>
+        <span class="n">dr</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+
+        <span class="n">dr</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="n">rr</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">writer</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="n">process</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">stdin</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">stdin</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">IOError</span><span class="p">:</span>
+                <span class="k">pass</span>
+        <span class="n">stderr</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="n">stdout</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</div>
+<div class="viewcode-block" id="GPGBase._handle_io"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._handle_io">[docs]</a>    <span class="k">def</span> <span class="nf">_handle_io</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="nb">file</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">passphrase</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">binary</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Handle a call to GPG - pass input data, collect output data.&quot;&quot;&quot;</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_open_subprocess</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">passphrase</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">binary</span><span class="p">:</span>
+            <span class="n">stdin</span> <span class="o">=</span> <span class="n">codecs</span><span class="o">.</span><span class="n">getwriter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_encoding</span><span class="p">)(</span><span class="n">p</span><span class="o">.</span><span class="n">stdin</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">stdin</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">stdin</span>
+        <span class="k">if</span> <span class="n">passphrase</span><span class="p">:</span>
+            <span class="n">_util</span><span class="o">.</span><span class="n">_write_passphrase</span><span class="p">(</span><span class="n">stdin</span><span class="p">,</span> <span class="n">passphrase</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_encoding</span><span class="p">)</span>
+        <span class="n">writer</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">_threaded_copy_data</span><span class="p">(</span><span class="nb">file</span><span class="p">,</span> <span class="n">stdin</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_collect_output</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">writer</span><span class="p">,</span> <span class="n">stdin</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+</div>
+<div class="viewcode-block" id="GPGBase._recv_keys"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._recv_keys">[docs]</a>    <span class="k">def</span> <span class="nf">_recv_keys</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">keyids</span><span class="p">,</span> <span class="n">keyserver</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Import keys from a keyserver.</span>
+
+<span class="sd">        :param str keyids: A space-delimited string containing the keyids to</span>
+<span class="sd">                           request.</span>
+<span class="sd">        :param str keyserver: The keyserver to request the ``keyids`` from;</span>
+<span class="sd">                              defaults to `gnupg.GPG.keyserver`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">keyserver</span><span class="p">:</span>
+            <span class="n">keyserver</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">keyserver</span>
+
+        <span class="n">args</span> <span class="o">=</span> <span class="p">[</span><span class="s">&#39;--keyserver {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">keyserver</span><span class="p">),</span>
+                <span class="s">&#39;--recv-keys {0}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">keyids</span><span class="p">)]</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">&#39;Requesting keys from </span><span class="si">%s</span><span class="s">: </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">keyserver</span><span class="p">,</span> <span class="n">keyids</span><span class="p">))</span>
+
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_result_map</span><span class="p">[</span><span class="s">&#39;import&#39;</span><span class="p">](</span><span class="bp">self</span><span class="p">)</span>
+        <span class="n">proc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_open_subprocess</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_collect_output</span><span class="p">(</span><span class="n">proc</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&#39;recv_keys result: </span><span class="si">%r</span><span class="s">&#39;</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">__dict__</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+</div>
+<div class="viewcode-block" id="GPGBase._sign_file"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._sign_file">[docs]</a>    <span class="k">def</span> <span class="nf">_sign_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">file</span><span class="p">,</span> <span class="n">default_key</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">passphrase</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                   <span class="n">clearsign</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">detach</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">binary</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span>
+                   <span class="n">digest_algo</span><span class="o">=</span><span class="s">&#39;SHA512&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create a signature for a file.</span>
+
+<span class="sd">        :param file: The file stream (i.e. it&#39;s already been open()&#39;d) to sign.</span>
+<span class="sd">        :param str default_key: The key to sign with.</span>
+<span class="sd">        :param str passphrase: The passphrase to pipe to stdin.</span>
+<span class="sd">        :param bool clearsign: If True, create a cleartext signature.</span>
+<span class="sd">        :param bool detach: If True, create a detached signature.</span>
+<span class="sd">        :param bool binary: If True, do not ascii armour the output.</span>
+<span class="sd">        :param str digest_algo: The hash digest to use. Again, to see which</span>
+<span class="sd">                                hashes your GnuPG is capable of using, do:</span>
+<span class="sd">                                ``$ gpg --with-colons --list-config</span>
+<span class="sd">                                digestname``. The default, if unspecified, is</span>
+<span class="sd">                                ``&#39;SHA512&#39;``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;_sign_file():&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">binary</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">&quot;Creating binary signature for file </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="nb">file</span><span class="p">)</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="p">[</span><span class="s">&#39;--sign&#39;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">&quot;Creating ascii-armoured signature for file </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="nb">file</span><span class="p">)</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="p">[</span><span class="s">&#39;--sign --armor&#39;</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">clearsign</span><span class="p">:</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&quot;--clearsign&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">detach</span><span class="p">:</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s">&quot;Cannot use both --clearsign and --detach-sign.&quot;</span><span class="p">)</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s">&quot;Using default GPG behaviour: --clearsign only.&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">detach</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">clearsign</span><span class="p">:</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&quot;--detach-sign&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">default_key</span><span class="p">:</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="s">&quot;--default-key </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">default_key</span><span class="p">))</span>
+
+        <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="s">&quot;--digest-algo </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">digest_algo</span><span class="p">))</span>
+
+        <span class="c">## We could use _handle_io here except for the fact that if the</span>
+        <span class="c">## passphrase is bad, gpg bails and you can&#39;t write the message.</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_result_map</span><span class="p">[</span><span class="s">&#39;sign&#39;</span><span class="p">](</span><span class="bp">self</span><span class="p">)</span>
+        <span class="n">proc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_open_subprocess</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">passphrase</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">passphrase</span><span class="p">:</span>
+                <span class="n">_util</span><span class="o">.</span><span class="n">_write_passphrase</span><span class="p">(</span><span class="n">proc</span><span class="o">.</span><span class="n">stdin</span><span class="p">,</span> <span class="n">passphrase</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_encoding</span><span class="p">)</span>
+            <span class="n">writer</span> <span class="o">=</span> <span class="n">_util</span><span class="o">.</span><span class="n">_threaded_copy_data</span><span class="p">(</span><span class="nb">file</span><span class="p">,</span> <span class="n">proc</span><span class="o">.</span><span class="n">stdin</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">IOError</span> <span class="k">as</span> <span class="n">ioe</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s">&quot;Error writing message: </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="nb">str</span><span class="p">(</span><span class="n">ioe</span><span class="p">))</span>
+            <span class="n">writer</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_collect_output</span><span class="p">(</span><span class="n">proc</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">writer</span><span class="p">,</span> <span class="n">proc</span><span class="o">.</span><span class="n">stdin</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+</div>
+<div class="viewcode-block" id="GPGBase._encrypt"><a class="viewcode-back" href="../../gnupg.html#gnupg._meta.GPGBase._encrypt">[docs]</a>    <span class="k">def</span> <span class="nf">_encrypt</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">recipients</span><span class="p">,</span>
+                 <span class="n">default_key</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">passphrase</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">armor</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                 <span class="n">encrypt</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                 <span class="n">symmetric</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span>
+                 <span class="n">always_trust</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+                 <span class="n">output</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+                 <span class="n">cipher_algo</span><span class="o">=</span><span class="s">&#39;AES256&#39;</span><span class="p">,</span>
+                 <span class="n">digest_algo</span><span class="o">=</span><span class="s">&#39;SHA512&#39;</span><span class="p">,</span>
+                 <span class="n">compress_algo</span><span class="o">=</span><span class="s">&#39;ZLIB&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Encrypt the message read from the file-like object **data**.</span>
+
+<span class="sd">        :param str data: The file or bytestream to encrypt.</span>
+
+<span class="sd">        :param str recipients: The recipients to encrypt to. Recipients must</span>
+<span class="sd">                               be specified keyID/fingerprint.</span>
+
+<span class="sd">        .. warning:: Care should be taken in Python2 to make sure that the</span>
+<span class="sd">                     given fingerprints for **recipients** are in fact strings</span>
+<span class="sd">                     and not unicode objects.</span>
+
+<span class="sd">        :param str default_key: The keyID/fingerprint of the key to use for</span>
+<span class="sd">                                signing. If given, **data** will be encrypted</span>
+<span class="sd">                                *and* signed.</span>
+
+<span class="sd">        :param str passphrase: If given, and **default_key** is also given,</span>
+<span class="sd">                               use this passphrase to unlock the secret</span>
+<span class="sd">                               portion of the **default_key** to sign the</span>
+<span class="sd">                               encrypted **data**.  Otherwise, if</span>
+<span class="sd">                               **default_key** is not given, but **symmetric**</span>
+<span class="sd">                               is ``True``, then use this passphrase as the</span>
+<span class="sd">                               passphrase for symmetric encryption. Signing</span>
+<span class="sd">                               and symmetric encryption should *not* be</span>
+<span class="sd">                               combined when sending the **data** to other</span>
+<span class="sd">                               recipients, else the passphrase to the secret</span>
+<span class="sd">                               key would be shared with them.</span>
+
+<span class="sd">        :param bool armor: If True, ascii armor the output; otherwise, the</span>
+<span class="sd">                           output will be in binary format. (Default: True)</span>
+
+<span class="sd">        :param bool encrypt: If True, encrypt the **data** using the</span>
+<span class="sd">                             **recipients** public keys. (Default: True)</span>
+
+<span class="sd">        :param bool symmetric: If True, encrypt the **data** to **recipients**</span>
+<span class="sd">                               using a symmetric key. See the **passphrase**</span>
+<span class="sd">                               parameter. Symmetric encryption and public key</span>
+<span class="sd">                               encryption can be used simultaneously, and will</span>
+<span class="sd">                               result in a ciphertext which is decryptable</span>
+<span class="sd">                               with either the symmetric **passphrase** or one</span>
+<span class="sd">                               of the corresponding private keys.</span>
+
+<span class="sd">        :param bool always_trust: If True, ignore trust warnings on</span>
+<span class="sd">                                  **recipients** keys. If False, display trust</span>
+<span class="sd">                                  warnings. (default: True)</span>
+
+<span class="sd">        :param str output: The output file to write to. If not specified, the</span>
+<span class="sd">                           encrypted output is returned, and thus should be</span>
+<span class="sd">                           stored as an object in Python. For example:</span>
+
+
+<span class="sd">        &gt;&gt;&gt; import shutil</span>
+<span class="sd">        &gt;&gt;&gt; import gnupg</span>
+<span class="sd">        &gt;&gt;&gt; if os.path.exists(&quot;doctests&quot;):</span>
+<span class="sd">        ...     shutil.rmtree(&quot;doctests&quot;)</span>
+<span class="sd">        &gt;&gt;&gt; gpg = gnupg.GPG(homedir=&quot;doctests&quot;)</span>
+<span class="sd">        &gt;&gt;&gt; key_settings = gpg.gen_key_input(key_type=&#39;RSA&#39;,</span>
+<span class="sd">        ...                                  key_length=1024,</span>
+<span class="sd">        ...                                  key_usage=&#39;ESCA&#39;,</span>
+<span class="sd">        ...                                  passphrase=&#39;foo&#39;)</span>
+<span class="sd">        &gt;&gt;&gt; key = gpg.gen_key(key_settings)</span>
+<span class="sd">        &gt;&gt;&gt; message = &quot;The crow flies at midnight.&quot;</span>
+<span class="sd">        &gt;&gt;&gt; encrypted = str(gpg.encrypt(message, key.printprint))</span>
+<span class="sd">        &gt;&gt;&gt; assert encrypted != message</span>
+<span class="sd">        &gt;&gt;&gt; assert not encrypted.isspace()</span>
+<span class="sd">        &gt;&gt;&gt; decrypted = str(gpg.decrypt(encrypted))</span>
+<span class="sd">        &gt;&gt;&gt; assert not decrypted.isspace()</span>
+<span class="sd">        &gt;&gt;&gt; decrypted</span>
+<span class="sd">        &#39;The crow flies at midnight.&#39;</span>
+
+<span class="sd">        :param str cipher_algo: The cipher algorithm to use. To see available</span>
+<span class="sd">                                algorithms with your version of GnuPG, do:</span>
+<span class="sd">                                :command:`$ gpg --with-colons --list-config</span>
+<span class="sd">                                ciphername`. The default **cipher_algo**, if</span>
+<span class="sd">                                unspecified, is ``&#39;AES256&#39;``.</span>
+
+<span class="sd">        :param str digest_algo: The hash digest to use. Again, to see which</span>
+<span class="sd">                                hashes your GnuPG is capable of using, do:</span>
+<span class="sd">                                :command:`$ gpg --with-colons --list-config</span>
+<span class="sd">                                digestname`.  The default, if unspecified, is</span>
+<span class="sd">                                ``&#39;SHA512&#39;``.</span>
+
+<span class="sd">        :param str compress_algo: The compression algorithm to use. Can be one</span>
+<span class="sd">                                  of ``&#39;ZLIB&#39;``, ``&#39;BZIP2&#39;``, ``&#39;ZIP&#39;``, or</span>
+<span class="sd">                                  ``&#39;Uncompressed&#39;``.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">if</span> <span class="n">output</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="s">&#39;fileno&#39;</span><span class="p">,</span> <span class="bp">None</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="c">## avoid overwrite confirmation message</span>
+                <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="s">&#39;name&#39;</span><span class="p">,</span> <span class="bp">None</span><span class="p">)</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">output</span><span class="p">):</span>
+                        <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+                    <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--output </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">output</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">output</span><span class="o">.</span><span class="n">name</span><span class="p">):</span>
+                        <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">output</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+                    <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--output </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">output</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">armor</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--armor&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">always_trust</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--always-trust&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cipher_algo</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--cipher-algo </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">cipher_algo</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">compress_algo</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--compress-algo </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">compress_algo</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">default_key</span><span class="p">:</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--sign&#39;</span><span class="p">)</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--default-key </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">default_key</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">digest_algo</span><span class="p">:</span>
+                <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--digest-algo </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">digest_algo</span><span class="p">)</span>
+
+        <span class="c">## both can be used at the same time for an encrypted file which</span>
+        <span class="c">## is decryptable with a passphrase or secretkey.</span>
+        <span class="k">if</span> <span class="n">symmetric</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--symmetric&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">encrypt</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--encrypt&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">recipients</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;GPG.encrypt() called for recipients &#39;</span><span class="si">%s</span><span class="s">&#39; with type &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span>
+                      <span class="o">%</span> <span class="p">(</span><span class="n">recipients</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">recipients</span><span class="p">)))</span>
+
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">recipients</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+                <span class="k">for</span> <span class="n">recp</span> <span class="ow">in</span> <span class="n">recipients</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">_util</span><span class="o">.</span><span class="n">_py3k</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">recp</span><span class="p">,</span> <span class="nb">unicode</span><span class="p">):</span>
+                            <span class="k">try</span><span class="p">:</span>
+                                <span class="k">assert</span> <span class="n">_parsers</span><span class="o">.</span><span class="n">_is_hex</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">recp</span><span class="p">))</span>
+                            <span class="k">except</span> <span class="ne">AssertionError</span><span class="p">:</span>
+                                <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s">&quot;Can&#39;t accept recipient string: </span><span class="si">%s</span><span class="s">&quot;</span>
+                                         <span class="o">%</span> <span class="n">recp</span><span class="p">)</span>
+                            <span class="k">else</span><span class="p">:</span>
+                                <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--recipient </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="nb">str</span><span class="p">(</span><span class="n">recp</span><span class="p">))</span>
+                                <span class="k">continue</span>
+                            <span class="c">## will give unicode in 2.x as &#39;\uXXXX\uXXXX&#39;</span>
+                            <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--recipient </span><span class="si">%r</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">recp</span><span class="p">)</span>
+                            <span class="k">continue</span>
+                    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">recp</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                        <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--recipient </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">recp</span><span class="p">)</span>
+
+            <span class="k">elif</span> <span class="p">(</span><span class="ow">not</span> <span class="n">_util</span><span class="o">.</span><span class="n">_py3k</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">recp</span><span class="p">,</span> <span class="nb">basestring</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">recp</span> <span class="ow">in</span> <span class="n">recipients</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s">&#39;</span><span class="se">\x20</span><span class="s">&#39;</span><span class="p">):</span>
+                    <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--recipient </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">recp</span><span class="p">)</span>
+
+            <span class="k">elif</span> <span class="n">_util</span><span class="o">.</span><span class="n">_py3k</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">recp</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">recp</span> <span class="ow">in</span> <span class="n">recipients</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s">&#39; &#39;</span><span class="p">):</span>
+                    <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;--recipient </span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">recp</span><span class="p">)</span>
+                    <span class="c">## ...and now that we&#39;ve proven py3k is better...</span>
+
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Don&#39;t know what to do with recipients: &#39;</span><span class="si">%s</span><span class="s">&#39;&quot;</span>
+                          <span class="o">%</span> <span class="n">recipients</span><span class="p">)</span>
+
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_result_map</span><span class="p">[</span><span class="s">&#39;crypt&#39;</span><span class="p">](</span><span class="bp">self</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Got data &#39;</span><span class="si">%s</span><span class="s">&#39; with type &#39;</span><span class="si">%s</span><span class="s">&#39;.&quot;</span>
+                  <span class="o">%</span> <span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">data</span><span class="p">)))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_handle_io</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span>
+                        <span class="n">passphrase</span><span class="o">=</span><span class="n">passphrase</span><span class="p">,</span> <span class="n">binary</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\n</span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">result</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+        </div>
+        <div class="sidebar">
+          <h3>Table Of Contents</h3>
+          <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../gnupg.html">gnupg package</a></li>
+</ul>
+
+          <h3 style="margin-top: 1.5em;">Search</h3>
+          <form class="search" action="../../search.html" method="get">
+            <input type="text" name="q" />
+            <input type="submit" value="Go" />
+            <input type="hidden" name="check_keywords" value="yes" />
+            <input type="hidden" name="area" value="default" />
+          </form>
+          <p class="searchtip" style="font-size: 90%">
+            Enter search terms or a module, class or function name.
+          </p>
+        </div>
+        <div class="clearer"></div>
+      </div>
+    </div>
+
+    <div class="footer-wrapper">
+      <div class="footer">
+        <div class="left">
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |
+          <a href="../../genindex.html" title="General Index"
+             >index</a>
+        </div>
+
+        <div class="right">
+          
+    <div class="footer">
+        &copy; Copyright 2013-2014, Isis Agora Lovecruft.
+      Last updated on Saturday, 02 August 2014.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.2.2.
+    </div>
+        </div>
+        <div class="clearer"></div>
+      </div>
+    </div>
+
+  </body>
+</html>

@@ -1,0 +1,631 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US">
+
+<head profile="http://gmpg.org/xfn/11">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+
+<title>Long-term Memory  &raquo; Blog Archive   &raquo; The internals of an OpenPGP key</title>
+
+<link rel="stylesheet" href="http://blog.dest-unreach.be/wp-content/themes/evanescence/style.css" type="text/css" media="screen" />
+<link rel="stylesheet" href="http://blog.dest-unreach.be/wp-content/themes/evanescence/print.css" type="text/css" media="print" />
+<link rel="alternate" type="application/rss+xml" title="Long-term Memory RSS Feed" href="http://blog.dest-unreach.be/feed" />
+<link rel="pingback" href="http://blog.dest-unreach.be/xmlrpc.php" />
+
+<link rel="alternate" type="application/rss+xml" title="Long-term Memory &raquo; The internals of an OpenPGP key Comments Feed" href="http://blog.dest-unreach.be/2009/04/13/the-internals-of-a-gpgpgp-key/feed" />
+<link rel='stylesheet' id='openid-css'  href='http://blog.dest-unreach.be/wp-content/plugins/openid/f/openid.css?ver=519' type='text/css' media='all' />
+<script type='text/javascript' src='http://blog.dest-unreach.be/wp-includes/js/jquery/jquery.js?ver=1.10.2'></script>
+<script type='text/javascript' src='http://blog.dest-unreach.be/wp-includes/js/jquery/jquery-migrate.min.js?ver=1.2.1'></script>
+<script type='text/javascript' src='http://blog.dest-unreach.be/wp-content/plugins/openid/f/openid.js?ver=519'></script>
+<link rel="EditURI" type="application/rsd+xml" title="RSD" href="http://blog.dest-unreach.be/xmlrpc.php?rsd" />
+<link rel="wlwmanifest" type="application/wlwmanifest+xml" href="http://blog.dest-unreach.be/wp-includes/wlwmanifest.xml" /> 
+<link rel='prev' title='Setup delay on wireless data networks' href='http://blog.dest-unreach.be/2009/04/01/setup-delay-on-wireless-data-networks' />
+<link rel='next' title='Turning webpage updates into RSS feeds' href='http://blog.dest-unreach.be/2009/04/14/turning-webpage-updates-into-rss-feeds' />
+<meta name="generator" content="WordPress 3.6.1" />
+<link rel='canonical' href='http://blog.dest-unreach.be/2009/04/13/the-internals-of-a-gpgpgp-key' />
+<link rel='shortlink' href='http://blog.dest-unreach.be/?p=999' />
+<script type="text/javascript" src="http://blog.dest-unreach.be/wp-content/plugins/flv-embed/swfobject.js"></script>
+<meta http-equiv="X-XRDS-Location" content="http://blog.dest-unreach.be/?xrds" />
+<meta http-equiv="X-Yadis-Location" content="http://blog.dest-unreach.be/?xrds" />
+<style type="text/css">.broken_link, a.broken_link {
+	text-decoration: line-through;
+}</style><style type="text/css">.removed_link, a.removed_link {
+	text-decoration: line-through;
+}</style></head>
+
+<body>
+<div id="page">
+
+<div id="header">
+<div><div>	
+	<div class="header-title">
+		<h1><a href="http://blog.dest-unreach.be" title="Long-term Memory: A collection of note-to-self&#039;s">Long-term Memory</a></h1>
+		<p>A collection of note-to-self&#039;s</p>
+	</div> 
+	<!-- Search box (If you prefer having search form as a sidebar widget, remove this block) -->
+	<div class="search">
+		<form method="get" id="searchform" action="http://blog.dest-unreach.be/">
+<input type="text" size="12" name="s" id="s" value="search..."  onblur="if(this.value=='') this.value='search...';" onfocus="if(this.value=='search...') this.value='';"/>
+</form>
+	</div> 
+	<!-- Search ends here-->
+</div></div>	
+</div>
+<div id="wrapper">
+
+	<div id="content">
+
+			
+		<div class="navigation">
+			<div class="alignleft">&laquo; <a href="http://blog.dest-unreach.be/2009/04/01/setup-delay-on-wireless-data-networks" rel="prev">Setup delay on wireless data networks</a></div>
+			<div class="alignright"><a href="http://blog.dest-unreach.be/2009/04/14/turning-webpage-updates-into-rss-feeds" rel="next">Turning webpage updates into RSS feeds</a> &raquo;</div>
+		</div>
+
+		<div class="post" id="post-999">
+			<div class="post-title"><div>
+				<h2><a href="http://blog.dest-unreach.be/2009/04/13/the-internals-of-a-gpgpgp-key" rel="bookmark" title="Permanent Link to The internals of an OpenPGP key">The internals of an OpenPGP key</a></h2>
+			</div></div>
+			<div class="post-entry">
+				<p>When I was updating my GPG/OpenPGP key, I did some research on the internals of the keys. There appear to be very nice tools to explore the internals of a key. You can also manipulate this key in different aspects: use multiple passwords on a single key, remove part of a secret key for enhanced security; you can even move subkeys between master-keys.</p>
+<p><span id="more-999"></span>Mandatory note: Before you try any of this on your own key, it would be wise to backup everything.</p>
+<p>Another note: All output below is from a temporary key, don&#8217;t use the keyid for anything useful.</p>
+<h3>The parts of a key</h3>
+<p>As <a href="http://www.gnupg.org/gph/en/manual.html#AEN196">everyone</a> can tell you, a GPG-key consists of 2 parts: a public and a private part. While this is true conceptually, it&#8217;s not true in practice: there are a lot of parameters that are in both parts. The <a href="http://www.gnupg.org/">gpgsplit</a> and <a href="http://www.pgpdump.net/">pgpdump</a> utilities can show the actual content of a key:</p>
+<table border="1">
+<tbody>
+<tr>
+<td valign="top">
+<pre>$ gpg --export &gt; key.pub
+$ gpgsplit -v -p key.pub. key.pub
+gpgsplit: writing `key.pub.000001-006.public_key'
+gpgsplit: writing `key.pub.000002-013.user_id'
+gpgsplit: writing `key.pub.000003-002.sig'
+gpgsplit: writing `key.pub.000004-014.public_subkey'
+gpgsplit: writing `key.pub.000005-002.sig'</pre>
+</td>
+<td valign="top">
+<pre>$ gpg --export-secret-keys &gt; key.sec
+$ gpgsplit -v -p key.sec. key.sec
+gpgsplit: writing `key.sec.000001-005.secret_key'
+gpgsplit: writing `key.sec.000002-013.user_id'
+gpgsplit: writing `key.sec.000003-002.sig'
+gpgsplit: writing `key.sec.000004-007.secret_subkey'
+gpgsplit: writing `key.sec.000005-002.sig'</pre>
+</td>
+</tr>
+</tbody>
+</table>
+<p>GPGsplit splits up the key into its components:</p>
+<ul>
+<li>000001 : The master DSA key used for signing. Either the public or the secret variant</li>
+<li>000002 : The user_id. This packets contains the name, email and comment. This component is identical in the public and private key</li>
+<li>000003 : A signature that binds this identity to the master DSA key</li>
+<li>000004 : The ElGamal key used for en/decryption. Either the public or the secret variant</li>
+<li>000005 : A signature that binds this encryption key to the master DSA key</li>
+</ul>
+<p>Combining multiple parts together is actually even easier: just cat them together!</p>
+<p>We can dig even deeper with pgpdump. It shows the actual content of one (or more) parts. I tabulated the output to make it more easily comparable.</p>
+<table border="1">
+<tbody>
+<tr>
+<td valign="top">
+<pre>$ pgpdump key.pub</pre>
+</td>
+<td valign="top">
+<pre>$ pgpdump key.sec</pre>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<pre>Old: Public Key Packet(tag 6)(418 bytes)
+	Ver 4 - new
+	Public key creation time - Mon Apr 13 11:19:26 CEST 2009
+	Pub alg - DSA Digital Signature Algorithm(pub 17)
+	DSA p(1024 bits) - ...
+	DSA q(160 bits) - ...
+	DSA g(1024 bits) - ...
+	DSA y(1023 bits) - ...</pre>
+</td>
+<td valign="top">
+<pre>Old: Secret Key Packet(tag 5)(481 bytes)
+	Ver 4 - new
+	Public key creation time - Mon Apr 13 11:19:26 CEST 2009
+	Pub alg - DSA Digital Signature Algorithm(pub 17)
+	DSA p(1024 bits) - ...
+	DSA q(160 bits) - ...
+	DSA g(1024 bits) - ...
+	DSA y(1023 bits) - ...
+	Sym alg - CAST5(sym 3)
+	Iterated and salted string-to-key(s2k 3):
+		Hash alg - SHA1(hash 2)
+		Salt - 4f 6d 16 29 91 67 59 c6
+		Count - 65536(coded count 96)
+	IV - cd 71 8e c5 b8 d1 88 de
+	Encrypted DSA x
+	Encrypted SHA1 hash</pre>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<pre>Old: User ID Packet(tag 13)(31 bytes)
+	User ID - ______ &lt;______@______.__&gt;</pre>
+</td>
+<td valign="top">
+<pre>Old: User ID Packet(tag 13)(31 bytes)
+	User ID - ______ &lt;______@______.__&gt;</pre>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<pre>Old: Signature Packet(tag 2)(96 bytes)
+	Ver 4 - new
+	Sig type - Positive certification of a User ID and Public Key packet(0x13).
+	Pub alg - DSA Digital Signature Algorithm(pub 17)
+	Hash alg - SHA1(hash 2)
+	Hashed Sub: signature creation time(sub 2)(4 bytes)
+		Time - Mon Apr 13 11:19:26 CEST 2009
+	Hashed Sub: key flags(sub 27)(1 bytes)
+		Flag - This key may be used to certify other keys
+		Flag - This key may be used to sign data
+	Hashed Sub: preferred symmetric algorithms(sub 11)(5 bytes)
+		Sym alg - AES with 256-bit key(sym 9)
+		Sym alg - AES with 192-bit key(sym 8<!-- smily bypass -->)
+		Sym alg - AES with 128-bit key(sym 7)
+		Sym alg - CAST5(sym 3)
+		Sym alg - Triple-DES(sym 2)
+	Hashed Sub: preferred hash algorithms(sub 21)(3 bytes)
+		Hash alg - SHA1(hash 2)
+		Hash alg - SHA256(hash 8<!-- smily bypass -->)
+		Hash alg - RIPEMD160(hash 3)
+	Hashed Sub: preferred compression algorithms(sub 22)(3 bytes)
+		Comp alg - ZLIB &lt;RFC1950&gt;(comp 2)
+		Comp alg - BZip2(comp 3)
+		Comp alg - ZIP &lt;RFC1951&gt;(comp 1)
+	Hashed Sub: features(sub 30)(1 bytes)
+		Flag - Modification detection (packets 18 and 19)
+	Hashed Sub: key server preferences(sub 23)(1 bytes)
+		Flag - No-modify
+	Sub: issuer key ID(sub 16)(8 bytes)
+		Key ID - 0xF8FF38F1AE14BF43
+	Hash left 2 bytes - ac 14
+	DSA r(160 bits) - ...
+	DSA s(159 bits) - ...
+		-&gt; hash(160 bits)</pre>
+</td>
+<td valign="top">
+<pre>Old: Signature Packet(tag 2)(96 bytes)
+	Ver 4 - new
+	Sig type - Positive certification of a User ID and Public Key packet(0x13).
+	Pub alg - DSA Digital Signature Algorithm(pub 17)
+	Hash alg - SHA1(hash 2)
+	Hashed Sub: signature creation time(sub 2)(4 bytes)
+		Time - Mon Apr 13 11:19:26 CEST 2009
+	Hashed Sub: key flags(sub 27)(1 bytes)
+		Flag - This key may be used to certify other keys
+		Flag - This key may be used to sign data
+	Hashed Sub: preferred symmetric algorithms(sub 11)(5 bytes)
+		Sym alg - AES with 256-bit key(sym 9)
+		Sym alg - AES with 192-bit key(sym 8<!-- smily bypass -->)
+		Sym alg - AES with 128-bit key(sym 7)
+		Sym alg - CAST5(sym 3)
+		Sym alg - Triple-DES(sym 2)
+	Hashed Sub: preferred hash algorithms(sub 21)(3 bytes)
+		Hash alg - SHA1(hash 2)
+		Hash alg - SHA256(hash 8<!-- smily bypass -->)
+		Hash alg - RIPEMD160(hash 3)
+	Hashed Sub: preferred compression algorithms(sub 22)(3 bytes)
+		Comp alg - ZLIB &lt;RFC1950&gt;(comp 2)
+		Comp alg - BZip2(comp 3)
+		Comp alg - ZIP &lt;RFC1951&gt;(comp 1)
+	Hashed Sub: features(sub 30)(1 bytes)
+		Flag - Modification detection (packets 18 and 19)
+	Hashed Sub: key server preferences(sub 23)(1 bytes)
+		Flag - No-modify
+	Sub: issuer key ID(sub 16)(8 bytes)
+		Key ID - 0xF8FF38F1AE14BF43
+	Hash left 2 bytes - ac 14
+	DSA r(160 bits) - ...
+	DSA s(159 bits) - ...
+		-&gt; hash(160 bits)</pre>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<pre>Old: Public Subkey Packet(tag 14)(525 bytes)
+	Ver 4 - new
+	Public key creation time - Mon Apr 13 11:19:26 CEST 2009
+	Pub alg - ElGamal Encrypt-Only(pub 16)
+	ElGamal p(2048 bits) - ...
+	ElGamal g(3 bits) - ...
+	ElGamal y(2047 bits) - ...</pre>
+</td>
+<td valign="top">
+<pre>Old: Secret Subkey Packet(tag 7)(611 bytes)
+	Ver 4 - new
+	Public key creation time - Mon Apr 13 11:19:26 CEST 2009
+	Pub alg - ElGamal Encrypt-Only(pub 16)
+	ElGamal p(2048 bits) - ...
+	ElGamal g(3 bits) - ...
+	ElGamal y(2047 bits) - ...
+	Sym alg - CAST5(sym 3)
+	Iterated and salted string-to-key(s2k 3):
+		Hash alg - SHA1(hash 2)
+		Salt - 4f 6d 16 29 91 67 59 c6
+		Count - 65536(coded count 96)
+	IV - 8c 06 ec cd 38 eb 70 20
+	Encrypted ElGamal x
+	Encrypted SHA1 hash</pre>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<pre>Old: Signature Packet(tag 2)(73 bytes)
+	Ver 4 - new
+	Sig type - Subkey Binding Signature(0x18).
+	Pub alg - DSA Digital Signature Algorithm(pub 17)
+	Hash alg - SHA1(hash 2)
+	Hashed Sub: signature creation time(sub 2)(4 bytes)
+		Time - Mon Apr 13 11:19:26 CEST 2009
+	Hashed Sub: key flags(sub 27)(1 bytes)
+		Flag - This key may be used to encrypt communications
+		Flag - This key may be used to encrypt storage
+	Sub: issuer key ID(sub 16)(8 bytes)
+		Key ID - 0xF8FF38F1AE14BF43
+	Hash left 2 bytes - 2e a7
+	DSA r(159 bits) - ...
+	DSA s(160 bits) - ...
+		-&gt; hash(160 bits)</pre>
+</td>
+<td valign="top">
+<pre>Old: Signature Packet(tag 2)(73 bytes)
+	Ver 4 - new
+	Sig type - Subkey Binding Signature(0x18).
+	Pub alg - DSA Digital Signature Algorithm(pub 17)
+	Hash alg - SHA1(hash 2)
+	Hashed Sub: signature creation time(sub 2)(4 bytes)
+		Time - Mon Apr 13 11:19:26 CEST 2009
+	Hashed Sub: key flags(sub 27)(1 bytes)
+		Flag - This key may be used to encrypt communications
+		Flag - This key may be used to encrypt storage
+	Sub: issuer key ID(sub 16)(8 bytes)
+		Key ID - 0xF8FF38F1AE14BF43
+	Hash left 2 bytes - 2e a7
+	DSA r(158 bits) - ...
+	DSA s(159 bits) - ...
+		-&gt; hash(160 bits)</pre>
+</td>
+</tr>
+</tbody>
+</table>
+<p>There are several things to discover within this output:</p>
+<ul>
+<li>The secret part of the master DSA packet contains all the information of the public key, plus some extra fields. It is thus possible to convert a secret key into a public key. This is exactly what &#8220;gpgsplit &#8211;secret-to-public&#8221; does.</li>
+<li>The public fields of the master DSA key (p, q, g and y) are plain-text; the secret field (x) is encrypted using a CAST5 encryption and a password (specified when creating the keypair)</li>
+<li>The same is true for the ElGamal key: p, g and y are public and plain text; x is secret and encrypted.</li>
+<li>Note that the secret parts of the DSA-key and the ElGamal key are seperately encrypted. I&#8217;ll explore this further in the following section</li>
+<li>The signature that binds the user_id to the master DSA key also contains the users preferences: which encryption and hashing algorithms are supported and in what order are they prefered.</li>
+</ul>
+<h3>Passwords on the secret keys</h3>
+<p>As noted above, the two secret keys (signing and encryption) are encrypted seperately. This opens up some nice opportunities for extra security. There is no requirement that the passphrase for both keys are the same! This is originally documented <a href="http://atom.smasher.org/gpg/gpg-passwords.txt">here</a> (<a href="http://blog.dest-unreach.be/wp-content/uploads/2009/04/pgp-multiple-passwords.txt">local mirror</a>).</p>
+<p>The principle behind this is actually fairly easy:</p>
+<ul>
+<li>Change the passphrase to <em>passphrase1</em> using the &#8220;gpg &#8211;edit-key&#8221; command</li>
+<li>Export the secret key: &#8220;gpg &#8211;export-secret-key &gt; key.sec.pass1&#8243;</li>
+<li>Change the passphrase to <em>passphrase2</em> using the &#8220;gpg &#8211;edit-key&#8221; command</li>
+<li>Export the secret key: &#8220;gpg &#8211;export-secret-key &gt; key.sec.pass2&#8243;</li>
+<li>Split both keys into their parts, cat together the relevant parts. You can choose between pass1 and pass2, but you need every part, in order! Only the &#8220;secret_key&#8221; and &#8220;secret_subkey&#8221; parts will differ; the other parts should be identical.</li>
+</ul>
+<blockquote>
+<pre>$ gpgsplit -p key.sec.pass1. -v key.sec.pass1
+gpgsplit: writing `key.sec.pass1.000001-005.secret_key'
+gpgsplit: writing `key.sec.pass1.000002-013.user_id'
+gpgsplit: writing `key.sec.pass1.000003-002.sig'
+gpgsplit: writing `key.sec.pass1.000004-007.secret_subkey'
+gpgsplit: writing `key.sec.pass1.000005-002.sig'
+$ gpgsplit -p key.sec.pass2. -v key.sec.pass2
+gpgsplit: writing `key.sec.pass2.000001-005.secret_key'
+gpgsplit: writing `key.sec.pass2.000002-013.user_id'
+gpgsplit: writing `key.sec.pass2.000003-002.sig'
+gpgsplit: writing `key.sec.pass2.000004-007.secret_subkey'
+gpgsplit: writing `key.sec.pass2.000005-002.sig'
+$
+$ cat key.sec.pass1.000001-005.secret_key \
+      key.sec.pass1.000002-013.user_id \
+      key.sec.pass1.000003-002.sig \
+      key.sec.pass2.000004-007.secret_subkey \
+      key.sec.pass1.000005-002.sig \
+   &gt; key.sec.bothpass</pre>
+</blockquote>
+<ul>
+<li>Delete your secret key from the GPG keyring: &#8220;gpg &#8211;delete-secret-key keyid&#8221;</li>
+<li>Import the multi-password key: &#8220;gpg &#8211;import key.sec.bothpass&#8221;</li>
+<li>Optional but highly recommended: Test the new setup</li>
+</ul>
+<blockquote>
+<pre>$ date | gpg --clearsign   # should work with passphrase1
+$ date | gpg --encrypt --armour --recipient keyid | gpg --decrypt   # should work with passphrase 2</pre>
+</blockquote>
+<h3>Multiple subkeys</h3>
+<p>A GPG/PGP key actually has three purposes:</p>
+<ul>
+<li>Sign/verify other keys</li>
+<li>Sign/verify messages</li>
+<li>Encrypt/decrypt messages</li>
+</ul>
+<p>By default, GPG creates 2 keys: one for encrypting (by default ElGamal), one for signing (by default DSA). It does not differentiate between both signing purposes.</p>
+<p>An important thing to note is that the userID is bound to the master DSA-key. This means that you cannot change your master DSA-key without loosing all your signatures on your userID(s). However, you are free to change your subkeys as often as you like. This is exactly the reason why I seperated the two signing-purposes into two different keys: The master DSA-key is still used to sign other keys, but I use a DSA-subkey to sign my messages. This way, I can change ElGamal and DSA-key every year without loosing all my signatures. This also has a security advantage: I don&#8217;t have to keep my master DSA secret key on my computer and can store it safely offline. The way to get this working is documented <span class="removed_link" title="http://belajar.internetsehat.org/pustaka/library-sw-hw/linux-1/gnupg/docs/Using%20multiple%20subkeys%20in%20GPG.htm">here</span> (<a href="http://blog.dest-unreach.be/wp-content/uploads/2009/04/pgp-subkeys.html">local mirror</a>).</p>
+<p>Basically it boils down to this: use &#8220;gpg &#8211;edit-key&#8221; to add a DSA subkey. GPG will sign messages with this subkey by default.</p>
+<p>To get a bit extra security, you can remove the master DSA secret key from your computer. Make sure you have a backup: you will need this secret key to sign other keys and to renew your subkeys. Since a subkey cannot exist without its parent, you need some tricks to get this working:</p>
+<blockquote>
+<pre>$ gpg --export-secret-subkeys n &gt; key.subsec</pre>
+</blockquote>
+<p>This exports only the subkeys and places them inside a dummy master key. Note the difference from above:</p>
+<blockquote>
+<pre>$ pgpdump key.subsec
+Old: Secret Key Packet(tag 5)(426 bytes)
+	Ver 4 - new
+	Public key creation time - Mon Apr 13 11:19:26 CEST 2009
+	Pub alg - DSA Digital Signature Algorithm(pub 17)
+	DSA p(1024 bits) - ...
+	DSA q(160 bits) - ...
+	DSA g(1024 bits) - ...
+	DSA y(1023 bits) - ...
+	Sym alg - CAST5(sym 3)
+	GnuPG string-to-key(s2k 101)
+	Encrypted DSA x
+	Encrypted SHA1 hash
+&lt;...&gt;</pre>
+</blockquote>
+<p>To get this version into your keyring you need to delete your secret key and import the crippeled one:</p>
+<blockquote>
+<pre>$ gpg --list-secret-key
+/tmp/gnupg/secring.gpg
+-----------------------
+sec   1024D/AE14BF43 2009-04-13
+uid                  ______ &lt;______@______.__&gt;
+ssb   2048g/56B47206 2009-04-13
+
+$ gpg --delete-secret-key keyid
+$ gpg --import key.subsec
+$ gpg --list-secret-key
+/tmp/gnupg/secring.gpg
+-----------------------
+sec#  1024D/AE14BF43 2009-04-13
+uid                  ______ &lt;______@______.__&gt;
+ssb   2048g/56B47206 2009-04-13
+ssb   1024D/56FB4157 2009-04-13</pre>
+</blockquote>
+<p>The &#8220;sec#&#8221; output indicates that the key material is not present.</p>
+<p>Note that you can combine this trick with the multiple-passwords trick mentioned above. I personally have a password for my master DSA key, and another password for my current DSA and ElGamal key.</p>
+<h3>Migrating keys</h3>
+<p>You can also migrate subkeys from one master key to another. This is not as simple as the multiple-passwords trick, since the signatures that bind the subkey to the master key need to be changed as well. You can even change a master DSA key into a DSA subkey! <a href="http://atom.smasher.org/gpg/gpg-migrate.txt">This page</a> (<a href="http://blog.dest-unreach.be/wp-content/uploads/2009/04/pgp-migrate-keys.txt">local mirror</a>) goes into the gory details.</p>
+							</div>
+	
+			<p class="post-meta">
+					This entry was posted by Niobos on 2009-04-13 at 14:03 under <a href="http://blog.dest-unreach.be/category/networking-security" title="View all posts in Networking &amp; Security" rel="category tag">Networking &amp; Security</a>. Tagged <a href="http://blog.dest-unreach.be/tag/gpg" rel="tag">gpg</a>, <a href="http://blog.dest-unreach.be/tag/openpgp" rel="tag">openpgp</a>. 					
+											You can <a href="#respond">leave a response</a>, or <a href="http://blog.dest-unreach.be/2009/04/13/the-internals-of-a-gpgpgp-key/trackback" rel="trackback">trackback</a> from your own site. Follow any responses to this entry through the <a href='http://blog.dest-unreach.be/2009/04/13/the-internals-of-a-gpgpgp-key/feed'>RSS 2.0</a> feed.
+
+					
+			</p>
+		</div>
+	
+<!-- You can start editing here. -->
+<div id="comments">
+	<h3>One Comment</h3>
+
+	<ol class="commentlist">
+
+	
+		<li class="alt" id="comment-162982">
+		<div style="margin:0;padding:0;">
+						<h4><cite><a href='https://blog.erroneousthoughts.org/2013/02/gnupg-subkeys-for-the-not-so-dummies/' rel='external nofollow' class='url'>&raquo; GnuPG subkeys for (the not so) dummies</a></cite> says:</h4>
+			<p>[...] <a href="http://blog.dest-unreach.be/2009/04/13/the-internals-of-a-gpgpgp-key" rel="nofollow">http://blog.dest-unreach.be/2009/04/13/the-internals-of-a-gpgpgp-key</a> [...]</p>
+						<small class="commentmetadata"><a href="#comment-162982" title="">2013-07-16, 11:30</a></small>
+					</div>
+		</li>
+
+	
+	
+	</ol>
+
+ 
+
+<h3 id="respond">Leave a Reply</h3>
+
+
+<form action="http://blog.dest-unreach.be/wp-comments-post.php" method="post" id="commentform">
+
+
+<p><input type="text" name="author" id="author" value="" size="22" tabindex="1" />
+<label for="author"><small>Name (required)</small></label></p>
+
+<p><input type="text" name="email" id="email" value="" size="22" tabindex="2" />
+<label for="email"><small>E-Mail (will not be published) (required)</small></label></p>
+
+<p><input type="text" name="url" id="url" value="" size="22" tabindex="3" />
+<label for="url"><small>Website</small></label></p>
+
+
+<!--<p><small><strong>XHTML:</strong> You can use these tags: &lt;a href=&quot;&quot; title=&quot;&quot;&gt; &lt;abbr title=&quot;&quot;&gt; &lt;acronym title=&quot;&quot;&gt; &lt;b&gt; &lt;blockquote cite=&quot;&quot;&gt; &lt;cite&gt; &lt;code&gt; &lt;del datetime=&quot;&quot;&gt; &lt;em&gt; &lt;i&gt; &lt;q cite=&quot;&quot;&gt; &lt;strike&gt; &lt;strong&gt; </small></p>-->
+
+<p><textarea name="comment" id="comment" rows="10" cols="" tabindex="4"></textarea></p>
+
+<p><input name="submit" type="submit" id="submit" tabindex="5" value="Submit Comment" />
+<input type="hidden" name="comment_post_ID" value="999" />
+</p>
+<p style="display: none;"><input type="hidden" id="akismet_comment_nonce" name="akismet_comment_nonce" value="0ddf9f5013" /></p>		<span id="openid_comment">
+			<label>
+				<input type="checkbox" id="login_with_openid" name="login_with_openid" checked="checked" />
+				Authenticate this comment using <span class="openid_link">OpenID</span>.			</label>
+		</span>
+		<script type="text/javascript">jQuery(function(){ add_openid_to_comment_form('http://blog.dest-unreach.be/index.php', '4897e20c96') })</script>
+<!-- BEGIN: subscribe to comments reloaded --><p><label for='subscribe-reloaded'><input style='width:30px' type='checkbox' name='subscribe-reloaded' id='subscribe-reloaded' value='yes' /> Notify me of followup comments via e-mail. You can also <a href='http://blog.dest-unreach.be/comment-subscriptions?srp=999&amp;sra=s'>subscribe</a> without commenting.</label></p><!-- END: subscribe to comments reloaded -->
+</form>
+
+
+</div>
+
+	
+	</div>
+
+	<div id="sidebar">
+	<div>
+		<ul>
+			<li id="meta-2" class="widget widget_meta"><h2 class="widgettitle">Meta</h2>
+			<ul>
+						<li><a href="https://blog.dest-unreach.be/wp-login.php">Log in</a></li>
+			<li><a href="http://blog.dest-unreach.be/feed" title="Syndicate this site using RSS 2.0">Entries <abbr title="Really Simple Syndication">RSS</abbr></a></li>
+			<li><a href="http://blog.dest-unreach.be/comments/feed" title="The latest comments to all posts in RSS">Comments <abbr title="Really Simple Syndication">RSS</abbr></a></li>
+			<li><a href="http://wordpress.org/" title="Powered by WordPress, state-of-the-art semantic personal publishing platform.">WordPress.org</a></li>						</ul>
+</li>
+<li id="pages-2" class="widget widget_pages"><h2 class="widgettitle">Pages</h2>
+		<ul>
+			<li class="page_item page-item-519"><a href="http://blog.dest-unreach.be/media-library">Media Library</a></li>
+		</ul>
+		</li>
+<li id="categories-179535971" class="widget widget_categories"><h2 class="widgettitle">Categories</h2>
+		<ul>
+	<li class="cat-item cat-item-88"><a href="http://blog.dest-unreach.be/category/multimedia" title="View all posts filed under Multimedia">Multimedia</a> (4)
+</li>
+	<li class="cat-item cat-item-61"><a href="http://blog.dest-unreach.be/category/networking-security" title="View all posts filed under Networking &amp; Security">Networking &amp; Security</a> (66)
+</li>
+	<li class="cat-item cat-item-4"><a href="http://blog.dest-unreach.be/category/rcheli" title="View all posts filed under RCheli">RCheli</a> (75)
+</li>
+	<li class="cat-item cat-item-101"><a href="http://blog.dest-unreach.be/category/renovation" title="View all posts filed under Renovation">Renovation</a> (1)
+</li>
+	<li class="cat-item cat-item-170"><a href="http://blog.dest-unreach.be/category/storage" title="View all posts filed under storage">storage</a> (2)
+</li>
+	<li class="cat-item cat-item-184"><a href="http://blog.dest-unreach.be/category/sysadmin" title="View all posts filed under sysadmin">sysadmin</a> (2)
+</li>
+	<li class="cat-item cat-item-1"><a href="http://blog.dest-unreach.be/category/uncategorized" title="View all posts filed under Uncategorized">Uncategorized</a> (42)
+</li>
+		</ul>
+</li>
+<li id="better-tag-cloud" class="widget widget_nktagcloud"><h2 class="widgettitle">Tags</h2>
+<ul class='wp-tag-cloud'>
+	<li><a href='http://blog.dest-unreach.be/tag/adjustment'  class='tag-link-35 nktagcloud-10' title='12 topics' rel="tag" style='font-size: 10.69pt;'>adjustment</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/apple'  class='tag-link-28 nktagcloud-8' title='4 topics' rel="tag" style='font-size: 8.54pt;'>Apple</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/calculator'  class='tag-link-102 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>calculator</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/catalyst'  class='tag-link-22 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>Catalyst</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/checkup'  class='tag-link-7 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>checkup</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/cisco'  class='tag-link-14 nktagcloud-10' title='13 topics' rel="tag" style='font-size: 10.96pt;'>Cisco</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/crash'  class='tag-link-87 nktagcloud-8' title='4 topics' rel="tag" style='font-size: 8.54pt;'>crash</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/crypto'  class='tag-link-66 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>crypto</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/dd-wrt'  class='tag-link-136 nktagcloud-9' title='8 topics' rel="tag" style='font-size: 9.62pt;'>dd-wrt</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/dns'  class='tag-link-82 nktagcloud-9' title='8 topics' rel="tag" style='font-size: 9.62pt;'>DNS</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/dnssec'  class='tag-link-112 nktagcloud-8' title='5 topics' rel="tag" style='font-size: 8.81pt;'>dnssec</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/electronics'  class='tag-link-39 nktagcloud-8' title='5 topics' rel="tag" style='font-size: 8.81pt;'>electronics</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/ethernet'  class='tag-link-83 nktagcloud-9' title='9 topics' rel="tag" style='font-size: 9.88pt;'>Ethernet</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/firewall'  class='tag-link-80 nktagcloud-8' title='5 topics' rel="tag" style='font-size: 8.81pt;'>firewall</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/flycamone2'  class='tag-link-40 nktagcloud-8' title='4 topics' rel="tag" style='font-size: 8.54pt;'>flycamone2</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/futaba'  class='tag-link-15 nktagcloud-8' title='4 topics' rel="tag" style='font-size: 8.54pt;'>Futaba</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/gsm'  class='tag-link-74 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>GSM</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/iphone'  class='tag-link-95 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>iPhone</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/ipsec'  class='tag-link-41 nktagcloud-8' title='5 topics' rel="tag" style='font-size: 8.81pt;'>IPsec</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/ipv6'  class='tag-link-69 nktagcloud-9' title='7 topics' rel="tag" style='font-size: 9.35pt;'>IPv6</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/links'  class='tag-link-63 nktagcloud-11' title='14 topics' rel="tag" style='font-size: 11.23pt;'>links</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/linux'  class='tag-link-59 nktagcloud-14' title='26 topics' rel="tag" style='font-size: 14.46pt;'>linux</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/logbook'  class='tag-link-26 nktagcloud-22' title='54 topics' rel="tag" style='font-size: 22pt;'>logbook</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/macosx'  class='tag-link-72 nktagcloud-14' title='25 topics' rel="tag" style='font-size: 14.19pt;'>MacOSX</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/maintenance'  class='tag-link-44 nktagcloud-10' title='11 topics' rel="tag" style='font-size: 10.42pt;'>maintenance</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/minititan'  class='tag-link-53 nktagcloud-11' title='15 topics' rel="tag" style='font-size: 11.5pt;'>miniTitan</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/nat'  class='tag-link-43 nktagcloud-8' title='5 topics' rel="tag" style='font-size: 8.81pt;'>NAT</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/perl'  class='tag-link-45 nktagcloud-9' title='8 topics' rel="tag" style='font-size: 9.62pt;'>Perl</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/procurve'  class='tag-link-12 nktagcloud-8' title='2 topics' rel="tag" style='font-size: 8pt;'>ProCurve</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/raptor'  class='tag-link-52 nktagcloud-21' title='52 topics' rel="tag" style='font-size: 21.46pt;'>raptor</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/rotor'  class='tag-link-6 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>rotor</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/router'  class='tag-link-36 nktagcloud-10' title='12 topics' rel="tag" style='font-size: 10.69pt;'>router</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/script'  class='tag-link-58 nktagcloud-11' title='14 topics' rel="tag" style='font-size: 11.23pt;'>script</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/ssh'  class='tag-link-21 nktagcloud-9' title='7 topics' rel="tag" style='font-size: 9.35pt;'>SSH</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/switch'  class='tag-link-11 nktagcloud-9' title='7 topics' rel="tag" style='font-size: 9.35pt;'>switch</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/trainer-cable'  class='tag-link-25 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>trainer-cable</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/trex600'  class='tag-link-160 nktagcloud-8' title='5 topics' rel="tag" style='font-size: 8.81pt;'>trex600</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/vpn'  class='tag-link-147 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>VPN</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/windows'  class='tag-link-70 nktagcloud-8' title='4 topics' rel="tag" style='font-size: 8.54pt;'>Windows</a></li>
+	<li><a href='http://blog.dest-unreach.be/tag/wordpress'  class='tag-link-54 nktagcloud-8' title='3 topics' rel="tag" style='font-size: 8.27pt;'>WordPress</a></li>
+</ul>
+</li>
+<li id="archives-2" class="widget widget_archive"><h2 class="widgettitle">Archives</h2>
+		<select name="archive-dropdown" onchange='document.location.href=this.options[this.selectedIndex].value;'> <option value="">Select Month</option> 	<option value='http://blog.dest-unreach.be/2013/10'> October 2013 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2013/07'> July 2013 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2013/05'> May 2013 &nbsp;(4)</option>
+	<option value='http://blog.dest-unreach.be/2013/03'> March 2013 &nbsp;(3)</option>
+	<option value='http://blog.dest-unreach.be/2013/02'> February 2013 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2012/12'> December 2012 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2012/09'> September 2012 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2012/07'> July 2012 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2012/06'> June 2012 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2012/05'> May 2012 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2012/04'> April 2012 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2012/03'> March 2012 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2012/02'> February 2012 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2012/01'> January 2012 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2011/12'> December 2011 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2011/10'> October 2011 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2011/08'> August 2011 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2011/06'> June 2011 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2011/05'> May 2011 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2011/04'> April 2011 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2011/03'> March 2011 &nbsp;(3)</option>
+	<option value='http://blog.dest-unreach.be/2011/01'> January 2011 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2010/12'> December 2010 &nbsp;(3)</option>
+	<option value='http://blog.dest-unreach.be/2010/11'> November 2010 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2010/10'> October 2010 &nbsp;(4)</option>
+	<option value='http://blog.dest-unreach.be/2010/08'> August 2010 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2010/07'> July 2010 &nbsp;(4)</option>
+	<option value='http://blog.dest-unreach.be/2010/06'> June 2010 &nbsp;(3)</option>
+	<option value='http://blog.dest-unreach.be/2010/05'> May 2010 &nbsp;(3)</option>
+	<option value='http://blog.dest-unreach.be/2010/03'> March 2010 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2010/02'> February 2010 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2010/01'> January 2010 &nbsp;(7)</option>
+	<option value='http://blog.dest-unreach.be/2009/12'> December 2009 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2009/11'> November 2009 &nbsp;(4)</option>
+	<option value='http://blog.dest-unreach.be/2009/10'> October 2009 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2009/09'> September 2009 &nbsp;(4)</option>
+	<option value='http://blog.dest-unreach.be/2009/08'> August 2009 &nbsp;(3)</option>
+	<option value='http://blog.dest-unreach.be/2009/07'> July 2009 &nbsp;(4)</option>
+	<option value='http://blog.dest-unreach.be/2009/06'> June 2009 &nbsp;(4)</option>
+	<option value='http://blog.dest-unreach.be/2009/05'> May 2009 &nbsp;(6)</option>
+	<option value='http://blog.dest-unreach.be/2009/04'> April 2009 &nbsp;(9)</option>
+	<option value='http://blog.dest-unreach.be/2009/03'> March 2009 &nbsp;(6)</option>
+	<option value='http://blog.dest-unreach.be/2009/02'> February 2009 &nbsp;(4)</option>
+	<option value='http://blog.dest-unreach.be/2009/01'> January 2009 &nbsp;(5)</option>
+	<option value='http://blog.dest-unreach.be/2008/12'> December 2008 &nbsp;(11)</option>
+	<option value='http://blog.dest-unreach.be/2008/11'> November 2008 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2008/10'> October 2008 &nbsp;(7)</option>
+	<option value='http://blog.dest-unreach.be/2008/09'> September 2008 &nbsp;(5)</option>
+	<option value='http://blog.dest-unreach.be/2008/08'> August 2008 &nbsp;(8)</option>
+	<option value='http://blog.dest-unreach.be/2008/07'> July 2008 &nbsp;(4)</option>
+	<option value='http://blog.dest-unreach.be/2008/06'> June 2008 &nbsp;(13)</option>
+	<option value='http://blog.dest-unreach.be/2008/05'> May 2008 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2008/04'> April 2008 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2008/03'> March 2008 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2008/02'> February 2008 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2007/12'> December 2007 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2007/11'> November 2007 &nbsp;(2)</option>
+	<option value='http://blog.dest-unreach.be/2007/10'> October 2007 &nbsp;(5)</option>
+	<option value='http://blog.dest-unreach.be/2007/09'> September 2007 &nbsp;(1)</option>
+	<option value='http://blog.dest-unreach.be/2007/08'> August 2007 &nbsp;(6)</option>
+	<option value='http://blog.dest-unreach.be/2007/07'> July 2007 &nbsp;(4)</option>
+ </select>
+</li>
+			
+		</ul> 
+	</div>
+	</div>
+</div> <!-- wrapper -->
+<div id="footer"><div><div><div>
+	<a href="http://blog.dest-unreach.be/feed">Entries (RSS)</a> and <a href="http://blog.dest-unreach.be/comments/feed">Comments (RSS)</a>.<br />
+		<a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/2.0/be/deed.en_US">
+			<img alt="Creative Commons License" style="border-width:0" src="http://i.creativecommons.org/l/by-nc-sa/2.0/be/88x31.png" />
+		</a>
+		This work by <a xmlns:cc="http://creativecommons.org/ns#" href="http://blog.dest-unreach.be/" property="cc:attributionName" rel="cc:attributionURL">
+			http://blog.dest-unreach.be/</a> is licensed under a 
+		<a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/2.0/be/deed.en_US">
+			Creative Commons Attribution-Noncommercial-Share Alike 2.0 Belgium License</a>.<br />
+	Powered by <a href="http://wordpress.org/" title="Powered by WordPress.">WordPress</a>. Theme <a href="http://srinig.com/wordpress/themes/evanescence/">Evanescence</a>.<br />
+	<!--	30 queries. 0.211 seconds. -->
+</div></div></div></div>
+</div> <!-- page -->
+</body>
+</html>
+	
