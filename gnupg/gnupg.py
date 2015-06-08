@@ -36,13 +36,7 @@ import os
 import re
 import textwrap
 
-try:
-    from io import StringIO
-except ImportError:
-    from cStringIO import StringIO
-
 #: see :pep:`328` http://docs.python.org/2.5/whatsnew/pep-328.html
-from .         import _parsers
 from .         import _util
 from .         import _trust
 from ._meta    import GPGBase
@@ -66,7 +60,7 @@ class GPG(GPGBase):
 
     def __init__(self, binary=None, homedir=None, verbose=False,
                  use_agent=False, keyring=None, secring=None,
-                 options=None):
+                 ignore_homedir_permissions=False, options=None):
         """Initialize a GnuPG process wrapper.
 
         :param str binary: Name for GnuPG binary executable. If the absolute
@@ -78,6 +72,10 @@ class GPG(GPGBase):
         :param str homedir: Full pathname to directory containing the public
                             and private keyrings. Default is whatever GnuPG
                             defaults to.
+
+        :type ignore_homedir_permissions: :obj:`bool`
+        :param ignore_homedir_permissions: If true, bypass check that homedir
+                                           be writable.
 
         :type verbose: :obj:`str` or :obj:`int` or :obj:`bool`
         :param verbose: String or numeric value to pass to GnuPG's
@@ -123,12 +121,16 @@ class GPG(GPGBase):
             secring=secring,
             options=options,
             verbose=verbose,
-            use_agent=use_agent,)
+            use_agent=use_agent,
+            ignore_homedir_permissions=ignore_homedir_permissions,
+        )
 
         log.info(textwrap.dedent("""
         Initialised settings:
         binary: %s
+        binary version: %s
         homedir: %s
+        ignore_homedir_permissions: %s
         keyring: %s
         secring: %s
         default_preference_list: %s
@@ -136,9 +138,16 @@ class GPG(GPGBase):
         options: %s
         verbose: %s
         use_agent: %s
-        """ % (self.binary, self.homedir, self.keyring, self.secring,
-               self.default_preference_list, self.keyserver, self.options,
-               str(self.verbose), str(self.use_agent))))
+        """ % (self.binary,
+               self.binary_version,
+               self.homedir,
+               self.ignore_homedir_permissions,
+               self.keyring,
+               self.secring,
+               self.default_preference_list,
+               self.keyserver, self.options,
+               str(self.verbose),
+               str(self.use_agent))))
 
         self._batch_dir = os.path.join(self.homedir, 'batch-files')
         self._key_dir  = os.path.join(self.homedir, 'generated-keys')
@@ -147,58 +156,52 @@ class GPG(GPGBase):
         self.temp_keyring = None
         #: The secring used in the most recently created batch file
         self.temp_secring = None
-        #: The version string of our GnuPG binary
-        self.binary_version = str()
 
-        ## check that everything runs alright, and grab the gpg binary's
-        ## version number while we're at it:
-        proc = self._open_subprocess(["--list-config", "--with-colons"])
-        result = self._result_map['list'](self)
-        self._read_data(proc.stdout, result)
-        if proc.returncode:
-            raise RuntimeError("Error invoking gpg: %s" % result.data)
+        # Make sure that the trustdb exists, or else GnuPG will exit with a
+        # fatal error (at least it does with GnuPG>=2.0.0):
+        self.create_trustdb()
 
-        version_line = str(result.data).partition(':version:')[2]
-        self.binary_version = version_line.split('\n')[0]
-        log.debug("Using GnuPG version %s" % self.binary_version)
-
-        if _util._is_gpg2:
-            # Make GnuPG>=2.0.0-only methods public:
-            self.fix_trustdb       = self._fix_trustdb
-            self.import_ownertrust = self._import_ownertrust
-            self.export_ownertrust = self._export_ownertrust
-
-            # Make sure that the trustdb exists, or else GnuPG will exit with
-            # a fatal error (at least it does with GnuPG>=2.0.0):
-            self._create_trustdb()
+        # The --no-use-agent and --use-agent options were deprecated in GnuPG
+        # 2.x, so we should set use_agent to None here to avoid having
+        # GPGBase._make_args() add either one.
+        if self.is_gpg2():
+            self.use_agent = None
 
     @functools.wraps(_trust._create_trustdb)
-    def _create_trustdb(self):
+    def create_trustdb(self):
         if self.is_gpg2():
             _trust._create_trustdb(self)
         else:
             log.info("Creating the trustdb is only available with GnuPG>=2.x")
+    # For backward compatibility with python-gnupg<=1.3.1:
+    _create_trustdb = create_trustdb
 
     @functools.wraps(_trust.fix_trustdb)
-    def _fix_trustdb(self, trustdb=None):
+    def fix_trustdb(self, trustdb=None):
         if self.is_gpg2():
             _trust.fix_trustdb(self)
         else:
             log.info("Fixing the trustdb is only available with GnuPG>=2.x")
+    # For backward compatibility with python-gnupg<=1.3.1:
+    _fix_trustdb = fix_trustdb
 
     @functools.wraps(_trust.import_ownertrust)
-    def _import_ownertrust(self, trustdb=None):
+    def import_ownertrust(self, trustdb=None):
         if self.is_gpg2():
             _trust.import_ownertrust(self)
         else:
             log.info("Importing ownertrust is only available with GnuPG>=2.x")
+    # For backward compatibility with python-gnupg<=1.3.1:
+    _import_ownertrust = import_ownertrust
 
     @functools.wraps(_trust.export_ownertrust)
-    def _export_ownertrust(self, trustdb=None):
+    def export_ownertrust(self, trustdb=None):
         if self.is_gpg2():
             _trust.export_ownertrust(self)
         else:
             log.info("Exporting ownertrust is only available with GnuPG>=2.x")
+    # For backward compatibility with python-gnupg<=1.3.1:
+    _export_ownertrust = export_ownertrust
 
     def is_gpg1(self):
         """Returns true if using GnuPG <= 1.x."""
@@ -284,15 +287,13 @@ class GPG(GPGBase):
         signatures. If using detached signatures, the file containing the
         detached signature should be specified as the ``sig_file``.
 
-        :param file file: A file descriptor object. Its type will be checked
-            with :func:`_util._is_file`.
+        :param file file: A file descriptor object.
 
         :param str sig_file: A file containing the GPG signature data for
             ``file``. If given, ``file`` is verified via this detached
-            signature.
+            signature. Its type will be checked with :func:`_util._is_file`.
         """
 
-        fn = None
         result = self._result_map['verify'](self)
 
         if sig_file is None:
@@ -307,19 +308,15 @@ class GPG(GPGBase):
                 return result
             log.debug('verify_file(): Handling detached verification')
             sig_fh = None
-            data_fh = None
             try:
                 sig_fh = open(sig_file, 'rb')
-                data_fh = open(file, 'rb')
                 args = ["--verify %s -" % sig_fh.name]
                 proc = self._open_subprocess(args)
-                writer = _util._threaded_copy_data(data_fh, proc.stdin)
+                writer = _util._threaded_copy_data(file, proc.stdin)
                 self._collect_output(proc, result, writer, stdin=proc.stdin)
             finally:
                 if sig_fh and not sig_fh.closed:
                     sig_fh.close()
-                if data_fh and not data_fh.closed:
-                    data_fh.close()
         return result
 
     def import_keys(self, key_data):
@@ -488,19 +485,7 @@ class GPG(GPGBase):
         self._collect_output(p, result, stdin=p.stdin)
         lines = result.data.decode(self._encoding,
                                    self._decode_errors).splitlines()
-        valid_keywords = 'pub uid sec fpr sub'.split()
-        for line in lines:
-            if self.verbose:
-                print(line)
-            log.debug("%r", line.rstrip())
-            if not line:
-                break
-            L = line.strip().split(':')
-            if not L:
-                continue
-            keyword = L[0]
-            if keyword in valid_keywords:
-                getattr(result, keyword)(L)
+        self._parse_keys(result)
         return result
 
     def list_packets(self, raw_data):
@@ -521,8 +506,8 @@ class GPG(GPGBase):
         >>> assert key.fingerprint
 
         :rtype: dict
-        :returns: A dictionary whose keys are the original keyid parameters,
-            and whose values are lists of signatures.
+        :returns: res.sigs is a dictionary whose keys are the uids and whose
+                values are a set of signature keyids.
         """
         if len(keyids) > self._batch_limit:
             raise ValueError(
@@ -537,7 +522,25 @@ class GPG(GPGBase):
         proc = self._open_subprocess(args)
         result = self._result_map['list'](self)
         self._collect_output(proc, result, stdin=proc.stdin)
+        self._parse_keys(result)
         return result
+
+    def _parse_keys(self, result):
+        lines = result.data.decode(self._encoding,
+                                   self._decode_errors).splitlines()
+        valid_keywords = 'pub uid sec fpr sub sig'.split()
+        for line in lines:
+            if self.verbose:
+                print(line)
+            log.debug("%r", line.rstrip())
+            if not line:
+                break
+            L = line.strip().split(':')
+            if not L:
+                continue
+            keyword = L[0]
+            if keyword in valid_keywords:
+                getattr(result, keyword)(L)
 
     def gen_key(self, input):
         """Generate a GnuPG key through batch file key generation. See
@@ -798,7 +801,7 @@ class GPG(GPGBase):
             key = key.replace('_','-').title()
             ## to set 'cert', 'Key-Usage' must be blank string
             if not key in ('Key-Usage', 'Subkey-Usage'):
-                if str(val).strip():
+                if type('')(val).strip():
                     parms[key] = val
 
         ## if Key-Type is 'default', make Subkey-Type also be 'default'
@@ -941,6 +944,13 @@ generate keys. Please see
         'The crow flies at midnight.'
 
 
+        :param bool throw_keyids: If True, make all **recipients** keyids be
+            zero'd out in packet information. This is the same as using
+            **hidden_recipients** for all **recipients**. (Default: False).
+
+        :param list hidden_recipients: A list of recipients that should have
+            their keyids zero'd out in packet information.
+
         :param str cipher_algo: The cipher algorithm to use. To see available
             algorithms with your version of GnuPG, do:
             :command:`$ gpg --with-colons --list-config ciphername`.
@@ -956,7 +966,10 @@ generate keys. Please see
 
         .. seealso:: :meth:`._encrypt`
         """
-        stream = _make_binary_stream(data, self._encoding)
+        if _is_stream(data):
+            stream = data
+        else:
+            stream = _make_binary_stream(data, self._encoding)
         result = self._encrypt(stream, recipients, **kwargs)
         stream.close()
         return result
