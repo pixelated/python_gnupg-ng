@@ -51,3 +51,5 @@ override_dh_auto_install:
 			--install-layout deb; \
 	done
 	rm $(PYBUILD_DESTDIR_python3)usr/bin/versioneer.py
+	# patch requires.txt file by stripping version information - these are provided by debian depends
+	find debian/ -name requires.txt |xargs perl -i -pe "s/(.*)==.*/\1/"
