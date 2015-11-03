@@ -1,5 +1,6 @@
-python-gnupg-ng (2.0.2-2.1) UNRELEASED; urgency=medium
+python-gnupg-ng (2.0.2-3) unstable; urgency=medium
 
+  * Fix Build-dependencies for python3-all and python3-all-dev
   * Bump standards version (no changes)
   * Update my email address
   * Fix invalid-short-name-in-dep5-copyright
