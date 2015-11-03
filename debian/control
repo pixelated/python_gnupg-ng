@@ -9,7 +9,7 @@ Build-Depends: python-all (>= 2.6.6-3), debhelper (>= 9),
 X-Python-Version: >= 2.6
 X-Python3-Version: >= 3.0
 Standards-Version: 3.9.5
-Uploaders: Micah Anderson <micah@debian.org>
+Uploaders: Micah Anderson <micah@leap.se>
 Homepage: https://github.com/isislovecruft/python-gnupg
 
 Package: python-gnupg-ng
