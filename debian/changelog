@@ -1,3 +1,9 @@
+python-gnupg-ng (2.0.2-2.1) UNRELEASED; urgency=medium
+
+  * Fix invalid-short-name-in-dep5-copyright
+
+ -- micah <micah@muck.riseup.net>  Mon, 02 Nov 2015 19:30:38 -0500
+
 python-gnupg-ng (2.0.2-2) unstable; urgency=medium
 
   * Remove requirements pinning on package.
