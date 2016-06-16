@@ -515,7 +515,7 @@ class GPG(GPGBase):
         """Validate the signatures for each of the ``keyids``.
 
         :rtype: dict
-        :returns: res.sigs is a dictionary whose keys are the uids and whose
+        :returns: res.certs is a dictionary whose keys are the uids and whose
                 values are a set of signature keyids.
         """
         return self._process_keys(keyids, check_sig=True)
@@ -528,10 +528,12 @@ class GPG(GPGBase):
                 % self._batch_limit)
 
         args = ["--with-colons", "--fixed-list-mode"]
-        args.append("--check-sigs") if check_sig else args.append("--list-sigs")
+        arg = "--check-sigs" if check_sig else "--list-sigs"
 
-        for key in keyids:
-            args.append(key)
+        if len(keyids):
+            arg += " " + " ".join(keyids)
+
+        args.append(arg)
 
         proc = self._open_subprocess(args)
         result = self._result_map['list'](self)
@@ -571,7 +573,7 @@ class GPG(GPGBase):
         :returns: The result mapping with details of the new key, which is a
                   :class:`GenKey <gnupg._parsers.GenKey>` object.
         """
-        args = ["--gen-key --batch"]
+        args = ["--gen-key --cert-digest-algo SHA512 --batch"]
         key = self._result_map['generate'](self)
         f = _make_binary_stream(input, self._encoding)
         self._handle_io(args, f, key, binary=True)
